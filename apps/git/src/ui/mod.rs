@@ -19,7 +19,8 @@ pub mod workflow;
 /// Keep closed path/ref choices compact while preserving full text in tooltips.
 pub fn compact_dropdown(dropdown: &gtk::DropDown) {
     use gtk::prelude::*;
-    fn factory(chars: i32) -> gtk::SignalListItemFactory {
+    // The open list (`list`) also checks the current choice.
+    fn factory(chars: i32, list: bool) -> gtk::SignalListItemFactory {
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(move |_, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
@@ -27,19 +28,33 @@ pub fn compact_dropdown(dropdown: &gtk::DropDown) {
             label.set_xalign(0.0);
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
             label.set_max_width_chars(chars);
-            item.set_child(Some(&label));
+            if !list {
+                item.set_child(Some(&label));
+                return;
+            }
+            label.set_hexpand(true);
+            let check = gtk::Image::from_icon_name("object-select-symbolic");
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            row.append(&label);
+            row.append(&check);
+            item.set_child(Some(&row));
+            item.connect_selected_notify(move |it| check.set_opacity(if it.is_selected() { 1.0 } else { 0.0 }));
         });
         factory.connect_bind(|_, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let text = item.item().unwrap().downcast::<gtk::StringObject>().unwrap().string();
-            let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
+            let child = item.child().unwrap();
+            let label = child.downcast_ref::<gtk::Label>().cloned().or_else(|| child.first_child().and_downcast::<gtk::Label>()).unwrap();
             label.set_text(&text);
             label.set_tooltip_text(Some(&text));
+            if let Some(check) = child.last_child().and_downcast::<gtk::Image>() {
+                check.set_opacity(if item.is_selected() { 1.0 } else { 0.0 });
+            }
         });
         factory
     }
-    dropdown.set_factory(Some(&factory(24)));
-    dropdown.set_list_factory(Some(&factory(60)));
+    dropdown.set_factory(Some(&factory(24, false)));
+    dropdown.set_list_factory(Some(&factory(60, true)));
 }
 
 pub mod workspace;
