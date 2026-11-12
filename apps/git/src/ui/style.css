@@ -825,6 +825,31 @@ window.git-window dropdown.git-pick.drop > button { color: @theme_danger; backgr
 window.git-window dropdown.git-pick.edit > button,
 window.git-window dropdown.git-pick.split > button { color: @theme_warning; background: alpha(@theme_warning, 0.10); box-shadow: none; }
 
+/* ---------- Welcome (no repository open) ---------- */
+
+.git-welcome-title {
+  font-size: 1.3em;
+  font-weight: 600;
+  color: @theme_text;
+}
+
+window.git-window button.git-welcome-row {
+  min-height: 34px;
+  padding: 0 10px;
+  background: transparent;
+  color: @theme_text;
+  font-weight: 400;
+}
+
+window.git-window button.git-welcome-row:hover {
+  background: @row_hover;
+}
+
+window.git-window button.git-welcome-row image {
+  -gtk-icon-size: 15px;
+  color: @theme_dim_text;
+}
+
 /* ---------- Views ---------- */
 
 .git-window .toolbar { min-height: 44px; padding: 0 12px 0 14px; background: transparent; }

@@ -114,6 +114,7 @@ impl Ui {
                 self.pages.set_visible_child_name("empty");
                 self.show_starts(true);
                 self.empty.set_text("Open a repository to view working changes.");
+                self.show_welcome(true);
                 self.header.show_repository(None, "");
                 self.header.show_branch(None, None, "");
                 nyx_ui::chrome::set_title(&self.window, "Git", "");

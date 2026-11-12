@@ -28,6 +28,8 @@ pub struct Ui {
     /// What the repository's state is, in words: the repository switcher's tooltip.
     pub readout: gtk::Label,
     pub header: super::header::Header,
+    main: gtk::Stack,
+    welcome_recent: gtk::Box,
     pub workflow: super::workflow::Workflow,
     pub graph: super::commit_graph::CommitGraph,
     pub tasks: super::tasks::Tasks,
@@ -310,7 +312,13 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     frame.add_css_class("window-frame");
     frame.append(&header.root);
-    frame.append(&body);
+    // With no repository open, a welcome page takes the whole window.
+    let (welcome, welcome_recent) = welcome();
+    let main = gtk::Stack::new();
+    main.set_vexpand(true);
+    main.add_named(&body, Some("repo"));
+    main.add_named(&welcome, Some("welcome"));
+    frame.append(&main);
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&frame));
     window.set_child(Some(&overlay));
@@ -325,6 +333,8 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
         pending: RefCell::new(Default::default()),
         readout,
         header: parts,
+        main,
+        welcome_recent,
         workflow,
         graph,
         tasks,
@@ -351,6 +361,7 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
         holding: Cell::new(false),
     });
     UI.with(|u| *u.borrow_mut() = Some(ui.clone()));
+    ui.show_welcome(true);
     ui.rebuild_navigation();
     ui.rebuild_tabs();
     ui.show_view(&initial);
@@ -602,6 +613,7 @@ impl Ui {
         }
     }
     pub fn apply(&self, snapshot: Snapshot) {
+        self.show_welcome(false);
         let previous_root = self.root();
         let same_root = previous_root.as_ref() == Some(&snapshot.repository.root);
         let previous = self.selection.selected_item().and_then(|o| super::changes::entry_of(&o)).filter(|_| same_root);
@@ -784,6 +796,42 @@ impl Ui {
         self.nav.set_visible(open);
         self.sidebar_rendered();
     }
+    /// The welcome page (no repository open) or the repository's pages.
+    pub fn show_welcome(&self, on: bool) {
+        self.main.set_visible_child_name(if on { "welcome" } else { "repo" });
+        self.view_switch.root.set_visible(!on);
+        if !on {
+            return;
+        }
+        while let Some(c) = self.welcome_recent.first_child() {
+            self.welcome_recent.remove(&c);
+        }
+        let recent: Vec<PathBuf> = prefs::get().recent.into_iter().filter(|r| r.exists()).take(8).collect();
+        if recent.is_empty() {
+            return;
+        }
+        self.welcome_recent.append(&widgets::label("RECENT", "git-insp-group"));
+        for path in recent {
+            let row = widgets::hbox(10);
+            row.append(&gtk::Image::from_icon_name("git-folder-symbolic"));
+            let name = widgets::label(&path.file_name().unwrap_or_default().to_string_lossy(), "git-welcome-name");
+            row.append(&name);
+            let place = widgets::label(&nyx_core::paths::pretty(&path), "git-file-dir");
+            place.set_hexpand(true);
+            place.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            row.append(&place);
+            let b = gtk::Button::new();
+            b.add_css_class("git-welcome-row");
+            b.set_child(Some(&row));
+            b.set_tooltip_text(Some(&format!("Open {}", path.display())));
+            b.connect_clicked(move |_| {
+                if let Some(ui) = current() {
+                    ui.open(path.clone());
+                }
+            });
+            self.welcome_recent.append(&b);
+        }
+    }
     /// New sidebar rows take the rail's compact layout.
     pub fn sidebar_rendered(&self) {
         self.compact.set(None);
@@ -905,6 +953,51 @@ pub fn toggle_sidebar() {
     if let Some(ui) = current() {
         ui.resize();
     }
+}
+/// The page shown with no repository open: open, clone or start one, or pick a recent one.
+fn welcome() -> (gtk::Box, gtk::Box) {
+    let page = widgets::vbox(8);
+    page.add_css_class("empty-state");
+    page.add_css_class("git-welcome");
+    page.set_halign(gtk::Align::Center);
+    page.set_valign(gtk::Align::Center);
+    let icon = gtk::Image::from_icon_name("git-git-symbolic");
+    icon.set_pixel_size(48);
+    icon.add_css_class("dim");
+    page.append(&icon);
+    let title = widgets::label("Open a repository", "git-welcome-title");
+    title.set_xalign(0.5);
+    page.append(&title);
+    let note = widgets::label("Open a folder with a Git repository, clone one, or start a new one.", "dim-label");
+    note.set_xalign(0.5);
+    page.append(&note);
+    let buttons = widgets::hbox(8);
+    buttons.set_halign(gtk::Align::Center);
+    buttons.set_margin_top(12);
+    let open = widgets::labeled_button("git-folder-symbolic", "Open…");
+    open.add_css_class("suggested-action");
+    open.set_tooltip_text(Some("Open a repository (Ctrl+O)"));
+    open.connect_clicked(|_| choose_folder(false));
+    buttons.append(&open);
+    let clone = widgets::labeled_button("git-download-symbolic", "Clone…");
+    clone.connect_clicked(|_| super::providers::clone_url());
+    buttons.append(&clone);
+    let new = widgets::labeled_button("git-plus-symbolic", "New repository…");
+    new.connect_clicked(|_| super::initialize::show());
+    buttons.append(&new);
+    page.append(&buttons);
+    let discover = gtk::Button::with_label("Find repositories in a folder…");
+    discover.add_css_class("git-link");
+    discover.set_halign(gtk::Align::Center);
+    discover.set_tooltip_text(Some("Ctrl+Shift+O"));
+    discover.connect_clicked(|_| choose_folder(true));
+    page.append(&discover);
+    let recent = widgets::vbox(2);
+    recent.add_css_class("git-welcome-recent");
+    recent.set_size_request(460, -1);
+    recent.set_margin_top(18);
+    page.append(&recent);
+    (page, recent)
 }
 pub fn choose_folder(discover: bool) {
     let Some(ui) = current() else { return };
