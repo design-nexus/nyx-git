@@ -288,10 +288,6 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     split.set_position(prefs::get().details_position.max(160));
     split.set_vexpand(true);
     content.append(&split);
-    let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    body.set_vexpand(true);
-    body.append(&nav);
-    body.append(&content);
 
     // ----- Header -----
     // The app, the repository and its branch; the destinations in the middle; Sync, Go to,
@@ -309,19 +305,16 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     header.end.append(&chrome::settings_button(super::settings::open));
     parts.hide_sync();
     let readout = widgets::label("No repository open", "");
-    let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    frame.add_css_class("window-frame");
-    frame.append(&header.root);
-    // With no repository open, a welcome page takes the whole window.
+    // With no repository open, the sidebar hides and a welcome page takes the page.
     let (welcome, welcome_recent) = welcome();
     let main = gtk::Stack::new();
     main.set_vexpand(true);
-    main.add_named(&body, Some("repo"));
+    main.add_named(&content, Some("repo"));
     main.add_named(&welcome, Some("welcome"));
-    frame.append(&main);
-    let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&frame));
-    window.set_child(Some(&overlay));
+    let frame = nyx_ui::frame::AppFrame::new(&header.root);
+    frame.set_sidebar(&nav);
+    frame.set_page(&main);
+    let overlay = frame.install(&window);
     let ui = Rc::new(Ui {
         window,
         overlay,
