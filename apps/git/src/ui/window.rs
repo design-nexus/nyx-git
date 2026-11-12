@@ -680,6 +680,7 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
         ui.view_stack.set_transition_duration(if prefs::get().reduce_motion { 0 } else { 160 });
     });
     ui.resize();
+    super::name_icon_buttons(ui.window.upcast_ref());
     ui.window.present();
     super::dev::capture(app, &ui.window);
     if prefs::take_broken() {
@@ -1070,6 +1071,8 @@ impl Ui {
         nyx_ui::settings_card::fit(&self.window);
         self.readout.set_visible(width >= 1180);
         self.view_switch.set_compact(width < 980);
+        self.destinations.flow.set_narrow(width < 980);
+        self.destinations.activity.set_narrow(width < 980);
         if self.compact.replace(Some(compact)) != Some(compact) {
             if compact {
                 self.nav.add_css_class("compact");

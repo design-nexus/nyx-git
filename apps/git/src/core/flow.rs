@@ -106,6 +106,15 @@ fn trunk(root: &Path, names: &HashSet<String>, current: Option<&str>) -> Option<
     }
     ["main", "master", "trunk", "develop"].iter().find(|n| names.contains(**n)).map(|n| n.to_string()).or(current.map(String::from))
 }
+/// `f` over `items` on a few threads, results in order: each item costs a Git process or two.
+fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(2, 8);
+    let size = items.len().div_ceil(workers).max(1);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items.chunks(size).map(|chunk| scope.spawn(|| chunk.iter().map(&f).collect::<Vec<R>>())).collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    })
+}
 fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
@@ -161,10 +170,9 @@ pub fn read(root: &Path, open: &Path, sessions: Vec<agents::Session>) -> Result<
     let limited = branches.len() > BRANCH_LIMIT;
     branches.truncate(BRANCH_LIMIT);
     let open_root = open.canonicalize().unwrap_or_else(|_| open.to_path_buf());
-    let trees: Vec<Worktree> = worktrees::list(root)?
-        .into_iter()
-        .take(64)
-        .map(|w| {
+    let listed: Vec<worktrees::Worktree> = worktrees::list(root)?.into_iter().take(64).collect();
+    let trees: Vec<Worktree> = parallel(&listed, |w| {
+            let w = w.clone();
             let dirty = (!w.bare && w.path.exists())
                 .then(|| operations::run(&w.path, operations::Operation::Status).ok().and_then(|b| status::parse(&b).ok()).map(|s| s.files.len()))
                 .flatten();
@@ -179,8 +187,7 @@ pub fn read(root: &Path, open: &Path, sessions: Vec<agents::Session>) -> Result<
                 prunable: w.prunable.is_some(),
                 path: w.path,
             }
-        })
-        .collect();
+        });
     let paths: Vec<PathBuf> = trees.iter().map(|w| w.path.clone()).collect();
     let agents: Vec<_> = sessions.into_iter().map(|s| {
         let w = agents::worktree_of(&s, &paths).cloned();
@@ -197,39 +204,45 @@ pub fn read(root: &Path, open: &Path, sessions: Vec<agents::Session>) -> Result<
         .collect();
     let recent = now() - RECENT_DAYS * 86400;
     let trunk_tip = trunk.as_ref().and_then(|t| branches.iter().find(|b| &b.name == t)).map(|b| b.tip.clone());
-    let mut worked = 0;
-    for b in branches.iter_mut() {
+    let mut candidates = Vec::new();
+    for (i, b) in branches.iter_mut().enumerate() {
         b.trunk = trunk.as_deref() == Some(b.name.as_str());
         if b.trunk {
             b.active = true;
             continue;
         }
         let pinned = b.current || checked_out.contains(b.name.as_str()) || agent_branches.contains(&b.name);
-        if !(pinned || b.time >= recent) || worked >= ACTIVE_LIMIT {
-            continue;
+        if (pinned || b.time >= recent) && candidates.len() < ACTIVE_LIMIT {
+            candidates.push((i, pinned, b.tip.clone()));
         }
-        worked += 1;
-        if let Some(t) = &trunk_tip {
-            b.divergence = counts(root, t, &b.tip);
-            b.fork = merge_base(root, t, &b.tip);
+    }
+    let worked = match &trunk_tip {
+        Some(t) => parallel(&candidates, |(_, _, tip)| (counts(root, t, tip), merge_base(root, t, tip))),
+        None => candidates.iter().map(|_| (None, None)).collect(),
+    };
+    for ((i, pinned, _), (divergence, fork)) in candidates.iter().zip(worked) {
+        let b = &mut branches[*i];
+        if trunk_tip.is_some() {
+            b.divergence = divergence;
+            b.fork = fork;
             b.merged = b.divergence.is_some_and(|(ahead, _)| ahead == 0);
             b.parent = trunk.clone();
         }
-        b.active = pinned || !b.merged;
+        b.active = *pinned || !b.merged;
     }
     // A branch started from another unmerged branch builds on it: the other's tip is among its
     // own commits beyond the trunk. Of several, the nearest (the one with most commits) wins.
     if let Some(t) = &trunk_tip {
-        let own: HashMap<String, HashSet<String>> = branches
+        let open: Vec<(String, String)> =
+            branches.iter().filter(|b| b.active && !b.trunk && !b.merged).take(ACTIVE_LIMIT).map(|b| (b.name.clone(), b.tip.clone())).collect();
+        let own: HashMap<String, HashSet<String>> = open
             .iter()
-            .filter(|b| b.active && !b.trunk && !b.merged)
-            .take(ACTIVE_LIMIT)
-            .map(|b| {
-                let ids = git(root, "List branch commits", &["rev-list", "--max-count=2000", &b.tip, "--not", t], false)
-                    .map(|o| String::from_utf8_lossy(&o).lines().map(String::from).collect())
-                    .unwrap_or_default();
-                (b.name.clone(), ids)
-            })
+            .zip(parallel(&open, |(_, tip)| {
+                git(root, "List branch commits", &["rev-list", "--max-count=2000", tip, "--not", t], false)
+                    .map(|o| String::from_utf8_lossy(&o).lines().map(String::from).collect::<HashSet<String>>())
+                    .unwrap_or_default()
+            }))
+            .map(|((name, _), ids)| (name.clone(), ids))
             .collect();
         let tips: HashMap<String, String> = branches.iter().map(|b| (b.name.clone(), b.tip.clone())).collect();
         let mut parents: HashMap<String, String> = HashMap::new();
@@ -251,16 +264,20 @@ pub fn read(root: &Path, open: &Path, sessions: Vec<agents::Session>) -> Result<
     }
     // Derived: lines of work that touch the same files (committed since their fork, plus
     // uncommitted changes in their worktrees).
-    let mut touched: BTreeMap<String, HashSet<PathBuf>> = BTreeMap::new();
-    for b in branches.iter().filter(|b| b.active && !b.trunk && !b.merged).take(40) {
-        let mut files = b.fork.as_ref().map(|f| changed(root, f, &b.tip)).unwrap_or_default();
-        if let Some(w) = trees.iter().find(|w| w.branch.as_deref() == Some(b.name.as_str()) && w.dirty.unwrap_or(0) > 0)
-            && let Ok(s) = operations::run(&w.path, operations::Operation::Status).and_then(|b| status::parse(&b))
-        {
-            files.extend(s.files.into_iter().map(|f| f.path));
-        }
-        touched.insert(b.name.clone(), files);
-    }
+    let lines: Vec<&Branch> = branches.iter().filter(|b| b.active && !b.trunk && !b.merged).take(40).collect();
+    let touched: BTreeMap<String, HashSet<PathBuf>> = lines
+        .iter()
+        .zip(parallel(&lines, |b| {
+            let mut files = b.fork.as_ref().map(|f| changed(root, f, &b.tip)).unwrap_or_default();
+            if let Some(w) = trees.iter().find(|w| w.branch.as_deref() == Some(b.name.as_str()) && w.dirty.unwrap_or(0) > 0)
+                && let Ok(s) = operations::run(&w.path, operations::Operation::Status).and_then(|b| status::parse(&b))
+            {
+                files.extend(s.files.into_iter().map(|f| f.path));
+            }
+            files
+        }))
+        .map(|(b, files)| (b.name.clone(), files))
+        .collect();
     let names: Vec<&String> = touched.keys().collect();
     let mut overlaps = Vec::new();
     for (i, a) in names.iter().enumerate() {

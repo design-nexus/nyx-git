@@ -413,3 +413,38 @@ multi-repo workflows, optional four-provider integrations and daily-use stabilit
       numbers and tinted changes. Errors stay until dismissed.
 - [x] Control interface for Nyx Assistant: `repo.open`, `repo.status`, `repo.log`,
       `repo.fetch` (not yet listed in the Assistant's nyx-apps ability).
+
+
+## Nyx Git 2.0 — implemented
+
+The redesign kept the core and the existing workflows and added, in this order:
+
+- [x] Five destinations in the header (Flow, Changes, History, Review, Activity), typed
+      command palette and quick switchers, persisted pane sizes.
+- [x] Changes: side-by-side and word-level diffs (hunk and line staging stay in the
+      unified view), blame, commit templates, rename and binary display.
+- [x] History: first-parent collapse and a Timeline over the same rows and edges.
+- [x] Operation journal for every core mutation; previews before reset, rebase, merge,
+      cherry-pick, revert, deletions, force push, discard, abort and worktree removal;
+      Activity merges the journal with HEAD's reflog and recovers by making branches.
+- [x] Flow: branches as a deterministic tree by ancestry, worktrees, Nyx Agents sessions
+      (from `hub.json`), requests with checks, and derived shared-file warnings, each
+      drawn its own way; card positions persist apart from Git.
+- [x] Rebase Studio (reorder, reword, edit, split, squash, fixup, drop; proposed history,
+      published commits, reorder conflict forecast; Skip) and Conflict Studio (Base, Ours,
+      Theirs, editable result, per-conflict choices, modify/delete and binary choices).
+- [x] Review: requests, checks, reviews or approvals, commits and files for GitHub,
+      GitLab, Forgejo and Gitea, checkout for review and server merges at the shown head.
+- [x] Control API 2 for `nyx git …`, Glimpse's Git panel and the Assistant.
+
+Validation: 59 package tests (temporary repositories and mock HTTP servers), including
+studios, safety, flow, fixtures (bare, unborn, detached, shallow, submodule, 300
+branches, mid-merge). `examples/flow_benchmark.rs` on 20,000 commits, 400 branches and
+8 worktrees: 384 ms to read, layout under 0.1 ms (this machine, 2026-11-11).
+
+Limits: previews forecast from the repository as it is; they can't promise an operation
+won't conflict. Recovery covers committed objects; discarded working-tree contents and
+remote changes aren't recoverable from here. Agent data is limited to live sessions in
+`hub.json` (title and status, no task details). Providers differ: GitLab reports no line
+counts and merges with the project's method. Review wasn't exercised against live
+accounts. Flow's layout is a tree by ancestry; other relationships are drawn over it.

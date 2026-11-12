@@ -104,6 +104,8 @@ impl State {
 }
 pub struct FlowPage {
     pub root: gtk::Box,
+    inner: gtk::Paned,
+    legend: gtk::Label,
     canvas: gtk::DrawingArea,
     list: gtk::ListBox,
     inspector: gtk::Box,
@@ -282,6 +284,8 @@ impl FlowPage {
         root.append(&readout);
         let me = Rc::new(Self {
             root,
+            inner,
+            legend,
             canvas,
             list,
             inspector,
@@ -458,6 +462,14 @@ impl FlowPage {
             })
         });
         nyx_theme::subscribe(&self.canvas, || page(|p| p.canvas.queue_draw()));
+    }
+    /// Narrow windows put the inspector under the canvas.
+    pub fn set_narrow(&self, narrow: bool) {
+        let o = if narrow { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal };
+        if self.inner.orientation() != o {
+            self.inner.set_orientation(o);
+        }
+        self.legend.set_visible(!narrow);
     }
     /// Read the flow again when Nyx Agents' sessions change.
     fn watch_agents(&self) {

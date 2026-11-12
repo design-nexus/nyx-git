@@ -13,6 +13,7 @@ use std::{
 
 pub struct Activity {
     pub root: gtk::Box,
+    paned: gtk::Paned,
     store: gio::ListStore,
     filter: gtk::CustomFilter,
     selection: gtk::SingleSelection,
@@ -164,6 +165,7 @@ impl Activity {
         root.append(&readout);
         let me = Rc::new(Self {
             root,
+            paned: paned.clone(),
             store,
             filter,
             selection: selection.clone(),
@@ -200,6 +202,13 @@ impl Activity {
         });
         me.inspect(None);
         me
+    }
+    /// Narrow windows put the inspector under the list.
+    pub fn set_narrow(&self, narrow: bool) {
+        let o = if narrow { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal };
+        if self.paned.orientation() != o {
+            self.paned.set_orientation(o);
+        }
     }
     fn matches(&self, e: &Event) -> bool {
         let source = match self.source.get() {

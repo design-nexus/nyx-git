@@ -187,3 +187,31 @@ pub fn conflict_studio_show(file: Option<std::path::PathBuf>) {
         ui.destinations.conflicts.show(file);
     }
 }
+
+/// Give every icon-only button an accessible name from its tooltip ("Refresh status (F5)"
+/// becomes "Refresh status"), so screen readers don't announce a bare "button".
+pub fn name_icon_buttons(root: &gtk::Widget) {
+    use gtk::prelude::*;
+    let mut stack = vec![root.clone()];
+    while let Some(w) = stack.pop() {
+        let mut child = w.first_child();
+        while let Some(c) = child {
+            child = c.next_sibling();
+            stack.push(c);
+        }
+        if !(w.is::<gtk::Button>() || w.is::<gtk::ToggleButton>() || w.is::<gtk::MenuButton>()) {
+            continue;
+        }
+        let has_text = w.downcast_ref::<gtk::Button>().and_then(|b| b.label()).is_some()
+            || w.first_child().is_some_and(|c| c.is::<gtk::Label>() || c.first_child().is_some_and(|g| g.is::<gtk::Label>() && g.next_sibling().is_none()));
+        if has_text {
+            continue;
+        }
+        if let Some(tip) = w.tooltip_text() {
+            let name = tip.split(" (").next().unwrap_or(&tip).split('\n').next().unwrap_or_default().trim_end_matches('…').to_string();
+            if !name.is_empty() {
+                w.update_property(&[gtk::accessible::Property::Label(&name)]);
+            }
+        }
+    }
+}
