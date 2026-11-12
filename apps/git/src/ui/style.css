@@ -414,8 +414,11 @@ window.git-window button.git-insp-action.danger:hover {
   min-height: 28px;
 }
 
+/* The line under the heading takes the group's section colour. */
 .git-group-head {
   margin: 14px 0 2px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid transparent;
 }
 
 .git-group-head.first {
