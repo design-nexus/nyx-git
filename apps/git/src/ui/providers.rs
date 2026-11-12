@@ -57,7 +57,7 @@ fn client_job<T: Send + 'static>(
 ) {
     nyx_core::cmd::background(move || Client::new(account.clone(), credentials::load(&account)?).and_then(work), done);
 }
-fn link(account: &Account, value: &str) {
+pub(super) fn link(account: &Account, value: &str) {
     match account_link(account, value) {
         Ok(url) => {
             if let Some(ui) = current() {
@@ -478,7 +478,7 @@ fn request_details(account: Account, repo: Repository, number: u64) {
         },
     );
 }
-fn checkout_request(account: Account, repo: Repository, request: Request) {
+pub(super) fn checkout_request(account: Account, repo: Repository, request: Request) {
     let Some(root) = current().and_then(|ui| ui.root()) else {
         error("Open a clone of this repository before checking out requests.");
         return;
@@ -585,7 +585,7 @@ fn issues(account: Account, repo: Repository, page: u32) {
         },
     );
 }
-fn new_request(account: Account, repo: Repository) {
+pub(super) fn new_request(account: Account, repo: Repository) {
     let (dialog, body) = widgets::dialog("New pull / merge request", 680);
     crate::dialog_dismissal::add(&dialog, &body, "Cancel");
     note(

@@ -840,6 +840,22 @@ impl FlowPage {
         }
         self.inspector.append(&box_);
     }
+    /// Select a branch's card, for other pages that point at it.
+    pub fn focus_branch(&self, name: &str) {
+        let id = flow::branch_id(name);
+        if self.state.borrow().nodes.iter().any(|(n, _)| *n == id) {
+            self.select(Some(id), true);
+        } else {
+            self.state.borrow_mut().selected = Some(id);
+        }
+    }
+    /// A branch's tip and the worktree it's checked out in, as Flow last read them.
+    pub fn branch(&self, name: &str) -> Option<(String, Option<PathBuf>)> {
+        let s = self.state.borrow();
+        let b = s.flow.as_ref()?.branches.iter().find(|b| b.name == name)?;
+        let w = s.worktree(&flow::branch_id(name)).map(|w| w.path.clone());
+        Some((b.tip.clone(), w))
+    }
     /// Pull and merge requests, from Review, to show on their branches.
     pub fn set_links(&self, links: Vec<Link>) {
         self.state.borrow_mut().links = links;

@@ -13,6 +13,7 @@ pub mod commit_graph;
 pub mod conflict_editor;
 pub mod conflict_studio;
 pub mod rebase_studio;
+pub mod review;
 pub mod diff_view;
 pub mod file_history;
 pub mod graph_renderer;

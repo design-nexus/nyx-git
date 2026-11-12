@@ -1,5 +1,6 @@
 //! Optional hosting APIs. Tokens never enter settings, URLs or Git command arguments.
 pub mod credentials;
+pub mod review;
 use anyhow::{Context, Result, bail, ensure};
 use reqwest::{
     Method,
@@ -106,6 +107,8 @@ pub struct Request {
     pub web_url: String,
     pub head: String,
     pub source: String,
+    /// The source branch's name alone (GitHub's `source` is `owner:branch`).
+    pub source_branch: String,
     pub target: String,
     pub status: String,
 }
@@ -431,6 +434,11 @@ pub fn parse_request(kind: Kind, v: &Value) -> Result<Request> {
         } else {
             v.pointer("/head/label").or(v.pointer("/head/ref")).and_then(Value::as_str).unwrap_or_default().into()
         },
+        source_branch: if gitlab {
+            optional(v, "source_branch")
+        } else {
+            v.pointer("/head/ref").and_then(Value::as_str).unwrap_or_default().into()
+        },
         target: if gitlab {
             optional(v, "target_branch")
         } else {
@@ -617,6 +625,58 @@ mod tests {
             assert_eq!(client.issues(repo, 1).unwrap().items[0].number, 2);
             assert_eq!(client.create_request(repo, "Change", "Details", "feature", "main", true).unwrap().number, 7);
             assert_eq!(client.checkout_reference(7).unwrap(), if gl { "refs/merge-requests/7/head" } else { "refs/pull/7/head" });
+            server.join().unwrap();
+        }
+    }
+    #[test]
+    fn review_endpoints_for_each_provider() {
+        let sha = "b".repeat(40);
+        for kind in [Kind::Github, Kind::Gitlab, Kind::Forgejo, Kind::Gitea] {
+            let gl = kind == Kind::Gitlab;
+            let prefix = match kind {
+                Kind::Github => "/subdir/api/v3",
+                Kind::Gitlab => "/subdir/api/v4",
+                _ => "/subdir/api/v1",
+            };
+            let repo_json = if gl {
+                json!({"id":73,"path_with_namespace":"team/sub/project","web_url":"https://forge.example/team/sub/project","http_url_to_repo":"https://forge.example/team/sub/project.git"})
+            } else {
+                json!({"full_name":"team/project","html_url":"https://forge.example/team/project","clone_url":"https://forge.example/team/project.git"})
+            };
+            let (find, repo_path, pulls) =
+                if gl { (format!("{prefix}/projects/team%2Fsub%2Fproject"), "projects/73", "merge_requests") } else { (format!("{prefix}/repos/team/project"), "repos/team/project", "pulls") };
+            let mut expected = vec![Expected { method: "GET", path: find, response: repo_json, body: None }];
+            match kind {
+                Kind::Github => {
+                    expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/commits/{sha}/check-runs?per_page=100"), response: json!({"check_runs":[]}), body: None });
+                    expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/commits/{sha}/status"), response: json!({"statuses":[{"context":"ci","state":"success"}]}), body: None });
+                }
+                Kind::Gitlab => expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/repository/commits/{sha}/statuses"), response: json!([{"name":"ci","status":"success"}]), body: None }),
+                _ => expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/commits/{sha}/statuses?limit=50"), response: json!([{"context":"ci","status":"success"}]), body: None }),
+            }
+            let files = if gl { json!({"changes":[{"new_path":"a.rs"}]}) } else { json!([{"filename":"a.rs","status":"modified","additions":1,"deletions":2}]) };
+            expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/{pulls}/7/{}", if gl { "changes" } else { "files" }), response: files, body: None });
+            let commits = if gl { json!([{"id":sha.clone(),"title":"Change","author_name":"Ada"}]) } else { json!([{"sha":sha.clone(),"commit":{"message":"Change\n\nBody","author":{"name":"Ada"}}}]) };
+            expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/{pulls}/7/commits"), response: commits, body: None });
+            let reviews = if gl { json!({"approved_by":[]}) } else { json!([{"user":{"login":"bo"},"state":"APPROVED","body":"ok"}]) };
+            expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/{pulls}/7/{}", if gl { "approvals" } else { "reviews" }), response: reviews, body: None });
+            let (method, body) = match kind {
+                Kind::Github => ("PUT", json!({"sha":sha.clone(),"merge_method":"merge"})),
+                Kind::Gitlab => ("PUT", json!({"sha":sha.clone()})),
+                _ => ("POST", json!({"Do":"merge","head_commit_id":sha.clone()})),
+            };
+            expected.push(Expected { method, path: format!("{prefix}/{repo_path}/{pulls}/7/merge"), response: json!({}), body: Some(body) });
+            let (client, server) = server(kind, expected);
+            let repo = client.find_repository(if gl { "team/sub/project" } else { "team/project.git" }).unwrap();
+            let checks = client.checks(&repo, &sha).unwrap();
+            assert_eq!(review::summary(&checks), Some(review::CheckState::Success));
+            assert_eq!(client.request_files(&repo, 7).unwrap()[0].path, "a.rs");
+            assert_eq!(client.request_commits(&repo, 7).unwrap()[0].subject, "Change");
+            assert_eq!(client.reviews(&repo, 7).unwrap().len(), if gl { 0 } else { 1 });
+            client.merge(&repo, 7, &sha, review::MergeMethod::Merge).unwrap();
+            if gl {
+                assert!(client.merge(&repo, 7, &sha, review::MergeMethod::Squash).is_err(), "GitLab merges as the project is set");
+            }
             server.join().unwrap();
         }
     }
