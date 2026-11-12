@@ -6,7 +6,7 @@ mod theme;
 mod ui;
 use gtk::{gio, glib, prelude::*};
 fn main() -> glib::ExitCode {
-    if let Some(code) = nyx_git::core::advanced::sequence_editor() {
+    if let Some(code) = nyx_git::core::advanced::sequence_editor().or_else(nyx_git::core::advanced::message_editor) {
         return glib::ExitCode::from(code as u8);
     }
     nyx_core::app::init(nyx_core::app::App { slug: "nyx-git", name: "Git" });

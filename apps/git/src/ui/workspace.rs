@@ -88,6 +88,7 @@ impl Ui {
         let position = self.split.position();
         let narrow = self.split.orientation() == gtk::Orientation::Vertical;
         let view = self.view_stack.visible_child_name().unwrap_or_else(|| "history".into()).to_string();
+        let view = if super::pages::is_studio(&view) { "changes".to_string() } else { view };
         let zoom = self.graph.zoom();
         let message = self.workflow.message();
         let amend = self.workflow.amend.is_active();

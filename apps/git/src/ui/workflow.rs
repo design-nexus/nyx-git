@@ -84,11 +84,17 @@ impl Workflow {
         operation_bar.add_css_class("git-actions");
         operation_bar.append(&operation_label);
         let controls = widgets::hbox(6);
-        controls.append(&button("Resolve conflicts…", "Choose a conflicted file", super::conflict_editor::choose));
+        controls.append(&button("Conflict Studio…", "Resolve the conflicted files", super::conflict_editor::choose));
         controls.append(&button("Continue…", "Continue the active operation", || {
             super::advanced::prepare(
                 nyx_git::core::advanced::Action::Continue,
                 "Continue using Git's prepared message after all conflicts are resolved and staged.".into(),
+            )
+        }));
+        controls.append(&button("Skip…", "Leave out the commit the operation stopped at", || {
+            super::advanced::prepare(
+                nyx_git::core::advanced::Action::Skip,
+                "Leave out the commit that stopped the operation and carry on with the next one. Its changes won't be in the result.".into(),
             )
         }));
         controls.append(&button("Abort…", "Abort the active operation", || {

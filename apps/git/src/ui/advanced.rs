@@ -1,7 +1,7 @@
 use super::window::current;
 use gtk::prelude::*;
 use nyx_git::core::{
-    advanced::{self, Action, Guard, Pick, ResetMode, Step},
+    advanced::{self, Action, Guard, ResetMode, Step},
     operations::Operation,
 };
 use nyx_ui::widgets;
@@ -24,6 +24,7 @@ fn destructive(action: &Action) -> bool {
         Action::Reset { mode: ResetMode::Hard, .. }
             | Action::Discard { .. }
             | Action::Abort
+            | Action::Skip
             | Action::DeleteTag { .. }
             | Action::DeleteBranch { .. }
             | Action::ForcePush { .. }
@@ -293,7 +294,7 @@ pub(super) fn target_action(kind: &'static str, text: String) {
                     move |result| match result {
                         Ok((root, base, steps)) => {
                             if kind == "interactive" {
-                                edit_plan(root, base, steps);
+                                super::rebase_studio::open(root, base, steps);
                             } else {
                                 widgets::ask_text(
                                     "Squash commits",
@@ -317,31 +318,42 @@ pub(super) fn target_action(kind: &'static str, text: String) {
         },
     );
 }
-fn edit_plan(root: PathBuf, base: String, original: Vec<Step>) {
-    let (dialog, body) = widgets::dialog("Interactive rebase", 720);
-    crate::dialog_dismissal::add(&dialog, &body, "Cancel");
-    let note = widgets::label(
-        "Oldest first. Reorder whole lines; replace pick with squash, fixup or drop. Keep every hash exactly once. The first retained commit must be pick. Squash keeps messages; fixup keeps the previous message.",
-        "dim-label",
+/// Start the studio's plan through the usual preview. When the rebase stops (to edit, split
+/// or resolve a conflict), Changes is where it carries on.
+pub fn prepare_interactive(root: PathBuf, base: String, steps: Vec<Step>, editor: PathBuf) {
+    let action = Action::Interactive { base, steps, editor };
+    nyx_core::cmd::background(
+        move || Guard::capture(&root).map(|g| (root, g)),
+        move |result| match result {
+            Ok((root, guard)) => {
+                let a = action.clone();
+                super::preview::confirm(
+                    root.clone(),
+                    nyx_git::core::preview::Subject::Advanced(action.clone()),
+                    "Start the rebase?".into(),
+                    "Replay the commits as planned. Commit hashes change from the first changed commit on. Edit and split steps stop so you can work in Changes; Continue carries on.".into(),
+                    "Start rebase".into(),
+                    true,
+                    move || {
+                        let Some(ui) = current() else { return };
+                        ui.execute_at_then(root.clone(), Operation::Advanced { action: Box::new(a.clone()), guard: Box::new(guard.clone()) }, |result| {
+                            let Some(ui) = current() else { return };
+                            let stopped = ui.snapshot.borrow().as_ref().and_then(|s| s.progress).is_some();
+                            if result.is_ok() && stopped {
+                                ui.show_view("changes");
+                                ui.toast("The rebase stopped to edit or split a commit. Make the changes, then Continue.");
+                            } else if result.is_err() && stopped {
+                                super::conflict_studio_show(None);
+                            } else if result.is_ok() {
+                                ui.show_view("history");
+                            }
+                        });
+                    },
+                );
+            }
+            Err(e) => fail(format!("{e:#}")),
+        },
     );
-    note.set_wrap(true);
-    body.append(&note);
-    let view = super::diff_view::DiffView::new();
-    let editor = view.root.child().unwrap().downcast::<sourceview5::View>().unwrap();
-    editor.set_editable(true);
-    view.set_text(&original.iter().map(|s| format!("pick {} # {}\n", s.id, s.subject)).collect::<String>());
-    view.root.set_min_content_height(300);
-    body.append(&view.root);
-    let run = gtk::Button::with_label("Review rebase…");
-    let d = dialog.clone();
-    run.connect_clicked(move |_|{
-        let text=view.buffer.text(&view.buffer.start_iter(),&view.buffer.end_iter(),false);let result=(||->anyhow::Result<Vec<Step>>{let mut steps=Vec::new();for line in text.lines().filter(|l|!l.trim().is_empty()){
-            let mut words=line.split_whitespace();let action=match words.next(){Some("pick")=>Pick::Pick,Some("squash")=>Pick::Squash,Some("fixup")=>Pick::Fixup,Some("drop")=>Pick::Drop,_=>anyhow::bail!("Use pick, squash, fixup or drop")};let id=words.next().ok_or_else(||anyhow::anyhow!("Missing commit hash"))?;
-            let source=original.iter().find(|s|s.id==id).ok_or_else(||anyhow::anyhow!("Unknown commit hash"))?;steps.push(Step{id:id.into(),action,subject:source.subject.clone()});}Ok(steps)})();
-        match result{Ok(steps)=>{d.close();match std::env::current_exe(){Ok(editor)=>prepare_at(root.clone(),Action::Interactive{base:base.clone(),steps,editor},"Replay this edited plan. Reordered changes can conflict. Dropped commits leave the branch; recovery retains the original HEAD. Shared commit hashes change.".into()),Err(e)=>fail(e)}},Err(e)=>fail(e)}
-    });
-    body.append(&run);
-    dialog.present();
 }
 /// Ask for a name, then create a branch at `id` without switching to it.
 pub fn branch_at(root: PathBuf, id: String) {

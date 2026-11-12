@@ -4,12 +4,20 @@ use std::{cell::RefCell, rc::Rc};
 
 pub struct Pages {
     pub flow: Rc<super::flow::FlowPage>,
+    pub rebase: Rc<super::rebase_studio::RebaseStudio>,
+    pub conflicts: Rc<super::conflict_studio::ConflictStudio>,
     pub activity: Rc<super::activity::Activity>,
     visible: RefCell<String>,
 }
 impl Pages {
     pub fn new() -> Self {
-        Self { flow: super::flow::FlowPage::new(), activity: super::activity::Activity::new(), visible: RefCell::new(String::new()) }
+        Self {
+            flow: super::flow::FlowPage::new(),
+            rebase: super::rebase_studio::RebaseStudio::new(),
+            conflicts: super::conflict_studio::ConflictStudio::new(),
+            activity: super::activity::Activity::new(),
+            visible: RefCell::new(String::new()),
+        }
     }
     /// The destinations the window offers, in header order.
     pub fn ids(&self) -> Vec<&'static str> {
@@ -19,6 +27,8 @@ impl Pages {
     }
     pub fn add_to(&self, stack: &gtk::Stack) {
         stack.add_named(&self.flow.root, Some("flow"));
+        stack.add_named(&self.rebase.root, Some("rebase"));
+        stack.add_named(&self.conflicts.root, Some("conflicts"));
         stack.add_named(&self.activity.root, Some("activity"));
     }
     /// `name` became the visible page.
@@ -38,6 +48,10 @@ impl Pages {
             _ => {}
         }
     }
+}
+/// Studios: pages opened for a task, not listed in the header.
+pub fn is_studio(name: &str) -> bool {
+    matches!(name, "rebase" | "conflicts")
 }
 /// History and Changes share the window's details pane; the other pages lay out their own.
 pub fn has_details(name: &str) -> bool {

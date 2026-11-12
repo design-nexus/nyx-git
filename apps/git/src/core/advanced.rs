@@ -127,12 +127,18 @@ pub enum ResetMode {
     Mixed,
     Hard,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Pick {
     Pick,
     Squash,
     Fixup,
     Drop,
+    /// Keep the changes with a new message (the step's `message`).
+    Reword,
+    /// Stop after this commit to amend it.
+    Edit,
+    /// Stop after this commit with its changes unstaged, to commit them in pieces.
+    Split,
 }
 impl Pick {
     fn name(&self) -> &'static str {
@@ -141,7 +147,13 @@ impl Pick {
             Self::Squash => "squash",
             Self::Fixup => "fixup",
             Self::Drop => "drop",
+            Self::Reword => "reword",
+            Self::Edit | Self::Split => "edit",
         }
+    }
+    /// Starts a commit of its own (rather than joining the previous one, or leaving).
+    pub fn keeps(&self) -> bool {
+        matches!(self, Self::Pick | Self::Reword | Self::Edit | Self::Split)
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -149,6 +161,9 @@ pub struct Step {
     pub id: String,
     pub action: Pick,
     pub subject: String,
+    /// The new message, for Reword.
+    #[serde(default)]
+    pub message: Option<String>,
 }
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -168,6 +183,8 @@ pub enum Action {
     ForcePush { remote: String, branch: String, lease: String },
     Discard { file: PathBuf, untracked: bool },
     Continue,
+    /// Leave out the commit the operation stopped at.
+    Skip,
     Abort,
 }
 fn args(items: &[&str]) -> Vec<OsString> {
@@ -197,6 +214,7 @@ impl Action {
             Self::ForcePush { .. } => "Force push with lease",
             Self::Discard { .. } => "Discard working changes",
             Self::Continue => "Continue operation",
+            Self::Skip => "Skip commit",
             Self::Abort => "Abort operation",
         }
     }
@@ -288,10 +306,13 @@ impl Action {
                 operations::paths(&mut a, std::slice::from_ref(file))?;
                 a
             }
-            Self::Continue | Self::Abort => {
+            Self::Continue | Self::Abort | Self::Skip => {
                 let progress = progress.context("No merge, rebase, cherry-pick or revert is in progress")?;
                 if matches!(self, Self::Continue) && progress == Active::Merge {
                     args(&["commit", "--no-edit"])
+                } else if matches!(self, Self::Skip) {
+                    ensure!(progress != Active::Merge, "A merge can't skip a commit; abort it instead");
+                    args(&[progress.command(), "--skip"])
                 } else {
                     args(&[progress.command(), if matches!(self, Self::Continue) { "--continue" } else { "--abort" }])
                 }
@@ -364,6 +385,7 @@ pub fn plan(root: &Path, base: &str) -> Result<Vec<Step>> {
             id: id.into(),
             action: Pick::Pick,
             subject: object.message_raw_sloppy().to_string().lines().next().unwrap_or_default().chars().take(200).collect(),
+            message: None,
         });
     }
     ensure!(!steps.is_empty(), "There are no commits after this base");
@@ -379,10 +401,240 @@ fn validate_plan(original: &[Step], steps: &[Step]) -> Result<()> {
         "The plan must contain each original commit exactly once; use Drop to omit a commit"
     );
     ensure!(
-        steps.iter().find(|s| s.action != Pick::Drop).is_some_and(|s| s.action == Pick::Pick),
-        "The first retained commit must use Pick"
+        steps.iter().find(|s| s.action != Pick::Drop).is_some_and(|s| s.action.keeps()),
+        "The first kept commit can't be squashed or fixed up into nothing"
     );
+    for s in steps.iter().filter(|s| s.action == Pick::Reword) {
+        ensure!(s.message.as_ref().is_some_and(|m| !m.trim().is_empty()), "Enter a message for each reworded commit");
+    }
     Ok(())
+}
+/// The studio's state for a rebase in progress, kept in the worktree's Git directory so a
+/// later Continue or Skip still rewords and splits as planned.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct Studio {
+    messages: std::collections::BTreeMap<String, String>,
+    splits: Vec<String>,
+    handled: Vec<String>,
+}
+fn studio_dir(git_dir: &Path) -> PathBuf {
+    git_dir.join("nyx-rebase")
+}
+fn read_studio(git_dir: &Path) -> Option<Studio> {
+    serde_json::from_slice(&fs::read(studio_dir(git_dir).join("studio.json")).ok()?).ok()
+}
+fn write_studio(git_dir: &Path, studio: &Studio) -> Result<()> {
+    fs::write(studio_dir(git_dir).join("studio.json"), serde_json::to_vec(studio)?)?;
+    Ok(())
+}
+/// Install the message editor for a planned rebase. Git calls it for each reword.
+fn prepare_studio(git_dir: &Path, steps: &[Step], editor: &Path) -> Result<()> {
+    let dir = studio_dir(git_dir);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir)?;
+    let link = dir.join("nyx-git-message-editor");
+    std::os::unix::fs::symlink(editor, &link)?;
+    let studio = Studio {
+        messages: steps.iter().filter(|s| s.action == Pick::Reword).filter_map(|s| Some((s.id.clone(), s.message.clone()?))).collect(),
+        splits: steps.iter().filter(|s| s.action == Pick::Split).map(|s| s.id.clone()).collect(),
+        handled: Vec::new(),
+    };
+    write_studio(git_dir, &studio)
+}
+/// The step a rebase last did, from `rebase-merge/done`: (command, commit).
+fn last_done(git_dir: &Path) -> Option<(String, String)> {
+    let done = fs::read_to_string(git_dir.join("rebase-merge/done")).ok()?;
+    let line = done.lines().rev().find(|l| !l.trim().is_empty() && !l.starts_with('#'))?;
+    let mut words = line.split_whitespace();
+    Some((words.next()?.to_string(), words.next()?.to_string()))
+}
+/// After a rebase step: unstage a commit planned for splitting where the rebase stopped at
+/// it, and tidy up once the rebase is over. Returns what happened, for the reader.
+fn after_rebase(root: &Path, git_dir: &Path) -> Result<Option<String>> {
+    let dir = studio_dir(git_dir);
+    if !dir.exists() {
+        return Ok(None);
+    }
+    if !git_dir.join("rebase-merge").is_dir() {
+        fs::remove_dir_all(&dir)?;
+        return Ok(None);
+    }
+    let Some(mut studio) = read_studio(git_dir) else { return Ok(None) };
+    let Some((command, id)) = last_done(git_dir) else { return Ok(None) };
+    if !matches!(command.as_str(), "edit" | "e") {
+        return Ok(None);
+    }
+    let Some(full) = studio.splits.iter().find(|s| s.starts_with(&id) && !studio.handled.contains(s)).cloned() else { return Ok(None) };
+    studio.handled.push(full.clone());
+    write_studio(git_dir, &studio)?;
+    // Git writes `amend` when it stops cleanly after an edit step; a conflict stop has none.
+    let clean = git_dir.join("rebase-merge/amend").exists()
+        && git(root, "Check conflicts", args(&["ls-files", "--unmerged"]), None, &[]).is_ok_and(|o| o.is_empty());
+    if !clean {
+        return Ok(Some("The rebase stopped for a conflict before the split; resolve it, then Continue.".into()));
+    }
+    let parent = git(root, "Read parent", args(&["rev-parse", "--verify", "--quiet", "HEAD^"]), None, &[]).ok();
+    match parent {
+        Some(_) => {
+            git(root, "Unstage commit for splitting", args(&["reset", "--mixed", "--quiet", "HEAD^", "--"]), None, &[])?;
+            Ok(Some(format!(
+                "Stopped to split {}: its changes are unstaged in Changes. Commit them in pieces, then Continue.",
+                &full[..full.len().min(10)]
+            )))
+        }
+        None => Ok(Some("A root commit can't be split here; amend it and Continue.".into())),
+    }
+}
+/// The message editor Git runs for a reworded commit during a studio rebase.
+pub fn message_editor() -> Option<i32> {
+    let args: Vec<_> = std::env::args_os().collect();
+    let me = PathBuf::from(args.first()?);
+    if me.file_name().is_none_or(|n| n != "nyx-git-message-editor") {
+        return None;
+    }
+    let result = (|| -> Result<()> {
+        let file = PathBuf::from(args.get(1).context("Missing message file")?);
+        let dir = me.parent().context("Missing studio directory")?;
+        let git_dir = dir.parent().context("Missing Git directory")?;
+        let Some((command, id)) = last_done(git_dir) else { return Ok(()) };
+        if !matches!(command.as_str(), "reword" | "r") {
+            // Squash and fixup messages, and anything else, are left as Git prepared them.
+            return Ok(());
+        }
+        let studio = read_studio(git_dir).unwrap_or_default();
+        if let Some((_, message)) = studio.messages.iter().find(|(k, _)| k.starts_with(&id)) {
+            fs::write(file, format!("{}\n", message.trim_end()))?;
+        }
+        Ok(())
+    })();
+    Some(match result {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("Nyx message editor: {e:#}");
+            1
+        }
+    })
+}
+/// What the Rebase Studio shows next to a plan: the files each commit changes, which commits
+/// a remote already has, the full messages, and other references inside the range (they stay
+/// on the old commits).
+#[derive(Clone, Debug, Default)]
+pub struct Facts {
+    pub branch: String,
+    pub files: std::collections::HashMap<String, Vec<PathBuf>>,
+    pub published: std::collections::HashSet<String>,
+    pub messages: std::collections::HashMap<String, String>,
+    pub other_refs: Vec<(String, String)>,
+}
+pub fn facts(root: &Path, base: &str) -> Result<Facts> {
+    operations::valid_id(base)?;
+    let range = format!("{base}..HEAD");
+    // Paths are for warnings only, so Git's quoting of unusual names is fine here.
+    let log = git(root, "Read changed files", args(&["log", "--format=%H", "--name-only", "--no-renames", &range]), None, &[])?;
+    let mut files: std::collections::HashMap<String, Vec<PathBuf>> = std::collections::HashMap::new();
+    let mut current: Option<String> = None;
+    for line in String::from_utf8_lossy(&log).lines() {
+        if line.len() == 40 && line.bytes().all(|b| b.is_ascii_hexdigit()) {
+            current = Some(line.to_string());
+            files.entry(line.to_string()).or_default();
+        } else if !line.is_empty()
+            && let Some(id) = &current
+        {
+            files.entry(id.clone()).or_default().push(PathBuf::from(line));
+        }
+    }
+    let ids: Vec<String> = String::from_utf8_lossy(&git(root, "List range", args(&["rev-list", &range]), None, &[])?).lines().map(String::from).collect();
+    let unpublished: std::collections::HashSet<String> =
+        String::from_utf8_lossy(&git(root, "Check published commits", args(&["rev-list", &range, "--not", "--remotes"]), None, &[])?).lines().map(String::from).collect();
+    let published = ids.iter().filter(|id| !unpublished.contains(*id)).cloned().collect();
+    let raw = git(root, "Read messages", args(&["log", "--format=%H%x00%B%x00", &range]), None, &[])?;
+    let mut messages = std::collections::HashMap::new();
+    let mut parts = raw.split(|b| *b == 0);
+    while let (Some(id), Some(body)) = (parts.next(), parts.next()) {
+        let id = String::from_utf8_lossy(id).trim().to_string();
+        if !id.is_empty() {
+            messages.insert(id, String::from_utf8_lossy(body).trim().to_string());
+        }
+    }
+    let branch = String::from_utf8_lossy(&git(root, "Read branch", args(&["rev-parse", "--abbrev-ref", "HEAD"]), None, &[])?).trim().to_string();
+    let set: std::collections::HashSet<&String> = ids.iter().collect();
+    let refs = git(root, "Read references", args(&["for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads", "refs/tags"]), None, &[])?;
+    let other_refs = String::from_utf8_lossy(&refs)
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .filter(|(id, name)| set.contains(&id.to_string()) && *name != branch)
+        .map(|(id, name)| (name.to_string(), id.to_string()))
+        .collect();
+    Ok(Facts { branch, files, published, messages, other_refs })
+}
+/// A commit of the history a plan would make: the original commits folded into it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Proposed {
+    pub ids: Vec<String>,
+    pub subject: String,
+    pub action: Pick,
+}
+/// The history `steps` would make, oldest first: squashes and fixups join the commit before,
+/// drops leave.
+pub fn proposed(steps: &[Step]) -> Vec<Proposed> {
+    let mut out: Vec<Proposed> = Vec::new();
+    for s in steps {
+        match s.action {
+            Pick::Drop => {}
+            Pick::Squash | Pick::Fixup => {
+                if let Some(last) = out.last_mut() {
+                    last.ids.push(s.id.clone());
+                }
+            }
+            _ => out.push(Proposed {
+                ids: vec![s.id.clone()],
+                subject: if s.action == Pick::Reword {
+                    s.message.as_deref().and_then(|m| m.lines().next()).unwrap_or(&s.subject).to_string()
+                } else {
+                    s.subject.clone()
+                },
+                action: s.action.clone(),
+            }),
+        }
+    }
+    out
+}
+/// Where reordering may conflict: a commit moved before one it used to follow, when both
+/// change the same file. A forecast, not a promise either way.
+pub fn reorder_warnings(original: &[Step], steps: &[Step], files: &std::collections::HashMap<String, Vec<PathBuf>>) -> Vec<String> {
+    let position: std::collections::HashMap<&str, usize> = original.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
+    let kept: Vec<&Step> = steps.iter().filter(|s| s.action != Pick::Drop).collect();
+    let mut out = Vec::new();
+    for (j, later) in kept.iter().enumerate() {
+        for earlier in &kept[..j] {
+            let (Some(a), Some(b)) = (position.get(earlier.id.as_str()), position.get(later.id.as_str())) else { continue };
+            if a > b {
+                let shared: Vec<_> = files
+                    .get(&earlier.id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|f| files.get(&later.id).is_some_and(|g| g.contains(f)))
+                    .map(|f| f.display().to_string())
+                    .collect();
+                if !shared.is_empty() {
+                    out.push(format!(
+                        "{} now comes before {}; both change {}.",
+                        &earlier.id[..earlier.id.len().min(8)],
+                        &later.id[..later.id.len().min(8)],
+                        shared.join(", ")
+                    ));
+                }
+            }
+        }
+    }
+    // Dropping a commit that later kept commits build on.
+    for (i, s) in steps.iter().enumerate().filter(|(_, s)| s.action == Pick::Drop) {
+        let touched = files.get(&s.id).cloned().unwrap_or_default();
+        if steps[i + 1..].iter().any(|t| t.action != Pick::Drop && files.get(&t.id).is_some_and(|g| g.iter().any(|f| touched.contains(f)))) {
+            out.push(format!("{} is dropped, but later commits change the same files.", &s.id[..s.id.len().min(8)]));
+        }
+    }
+    out
 }
 /// Called only through the sequence-editor symlink, before GTK is initialized.
 pub fn sequence_editor() -> Option<i32> {
@@ -413,7 +665,7 @@ pub fn sequence_editor() -> Option<i32> {
 }
 pub fn run(root: &Path, action: Action, guard: &Guard) -> Result<Vec<u8>> {
     guard.verify(root)?;
-    if !matches!(action, Action::Continue | Action::Abort) {
+    if !matches!(action, Action::Continue | Action::Abort | Action::Skip) {
         ensure!(guard.progress.is_none(), "Finish or abort the current Git operation first");
     }
     if matches!(
@@ -476,7 +728,17 @@ pub fn run(root: &Path, action: Action, guard: &Guard) -> Result<Vec<u8>> {
         validate_plan(original_plan.as_ref().unwrap(), steps)?;
     }
     let recovery = recovery_id.as_deref().map(|id| checkpoint(root, id)).transpose()?;
-    let env = [("GIT_EDITOR".into(), "true".into())];
+    let git_dir = repository::inspect(root)?.git_dir;
+    if let Action::Interactive { steps, editor, .. } = &action {
+        prepare_studio(&git_dir, steps, editor)?;
+    }
+    let studio_editor = studio_dir(&git_dir).join("nyx-git-message-editor");
+    let editor: OsString = if matches!(action, Action::Interactive { .. } | Action::Continue | Action::Skip) && studio_editor.exists() {
+        studio_editor.into_os_string()
+    } else {
+        "true".into()
+    };
+    let env = [("GIT_EDITOR".into(), editor)];
     let result = match &action {
         Action::Interactive { steps, editor, .. } => {
             let temp = tempfile::Builder::new().prefix("nyx-git-rebase-").tempdir_in("/tmp")?;
@@ -512,7 +774,20 @@ pub fn run(root: &Path, action: Action, guard: &Guard) -> Result<Vec<u8>> {
             git(root, action.label(), action.args(guard.progress)?, input, &env)
         }
     };
-    result.map_err(|e|anyhow::anyhow!("{e:#}{}",recovery.map(|r|format!("\nPre-operation commits are retained at {r}. Use Recovery to create a branch. Uncommitted file contents are not saved by this reference.")).unwrap_or_default()))
+    let result = result.map_err(|e|anyhow::anyhow!("{e:#}{}",recovery.map(|r|format!("\nPre-operation commits are retained at {r}. Use Recovery to create a branch. Uncommitted file contents are not saved by this reference.")).unwrap_or_default()));
+    if matches!(action, Action::Interactive { .. } | Action::Continue | Action::Skip | Action::Abort) {
+        match after_rebase(root, &git_dir) {
+            Ok(Some(note)) => {
+                return result.map(|mut out| {
+                    out.extend_from_slice(format!("\n{note}\n").as_bytes());
+                    out
+                });
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(%e, "Could not finish the rebase studio step"),
+        }
+    }
+    result
 }
 #[derive(Clone, Debug)]
 pub struct Recovery {

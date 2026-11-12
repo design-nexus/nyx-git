@@ -22,6 +22,26 @@ pub fn after_apply(ui: &super::window::Ui) {
         if let Some(view) = var("NYX_GIT_PREVIEW_VIEW") {
             ui.show_view(&view.to_string_lossy());
         }
+        if let Some(base) = var("NYX_GIT_PREVIEW_REBASE")
+            && let Some(root) = ui.root()
+        {
+            let base = base.to_string_lossy().into_owned();
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(800), move || {
+                match nyx_git::core::advanced::resolve_target(&root, &base).and_then(|b| nyx_git::core::advanced::plan(&root, &b).map(|s| (b, s))) {
+                    Ok((base, mut steps)) => {
+                        if let Some(s) = steps.get_mut(1) {
+                            s.action = nyx_git::core::advanced::Pick::Squash;
+                        }
+                        steps.reverse();
+                        super::rebase_studio::open(root, base, steps)
+                    }
+                    Err(e) => eprintln!("{e:#}"),
+                }
+            });
+        }
+        if var("NYX_GIT_PREVIEW_CONFLICTS").is_some() {
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(800), || super::conflict_studio_show(None));
+        }
         if let Some(index) = var("NYX_GIT_PREVIEW_SELECT").and_then(|v| v.to_string_lossy().parse().ok()) {
             gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
                 if let Some(ui) = super::window::current() {

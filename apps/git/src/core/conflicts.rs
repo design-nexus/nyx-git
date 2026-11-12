@@ -89,6 +89,106 @@ impl Conflict {
             && self.working.as_ref().is_none_or(|b| !b.contains(&0) && std::str::from_utf8(b).is_ok())
     }
 }
+/// What kind of conflict a file has, from which index stages exist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// Both sides changed the contents.
+    Content,
+    /// Both sides added a file at this path.
+    AddedByBoth,
+    /// We deleted it, they changed it.
+    DeletedByUs,
+    /// We changed it, they deleted it.
+    DeletedByThem,
+    /// Not text: a side has to be chosen whole.
+    Binary,
+}
+impl Conflict {
+    pub fn shape(&self) -> Shape {
+        match (&self.base, &self.ours, &self.theirs) {
+            _ if !self.text() => Shape::Binary,
+            (_, None, Some(_)) => Shape::DeletedByUs,
+            (_, Some(_), None) => Shape::DeletedByThem,
+            (None, Some(_), Some(_)) => Shape::AddedByBoth,
+            _ => Shape::Content,
+        }
+    }
+}
+/// One conflict in a file with markers: line numbers of its `<<<<<<<` and `>>>>>>>` lines,
+/// and each side's lines.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Block {
+    pub start: usize,
+    pub end: usize,
+    pub ours: Vec<String>,
+    pub base: Option<Vec<String>>,
+    pub theirs: Vec<String>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    Ours,
+    Theirs,
+    /// Ours, then theirs.
+    Both,
+    Base,
+}
+/// The conflict blocks in `text`, in order. Unbalanced markers end the scan.
+pub fn blocks(text: &str) -> Vec<Block> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if !lines[i].starts_with("<<<<<<<") {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let (mut ours, mut base, mut theirs) = (Vec::new(), None::<Vec<String>>, Vec::new());
+        let mut part = 0;
+        i += 1;
+        let mut closed = false;
+        while i < lines.len() {
+            let l = lines[i];
+            if l.starts_with("|||||||") && part == 0 {
+                part = 1;
+                base = Some(Vec::new());
+            } else if l.starts_with("=======") && part < 2 {
+                part = 2;
+            } else if l.starts_with(">>>>>>>") && part == 2 {
+                closed = true;
+                break;
+            } else {
+                match part {
+                    0 => ours.push(l.to_string()),
+                    1 => base.get_or_insert_with(Vec::new).push(l.to_string()),
+                    _ => theirs.push(l.to_string()),
+                }
+            }
+            i += 1;
+        }
+        if !closed {
+            break;
+        }
+        out.push(Block { start, end: i, ours, base, theirs });
+        i += 1;
+    }
+    out
+}
+/// `text` with conflict `index` replaced by the chosen side(s). The rest is untouched.
+pub fn apply(text: &str, index: usize, choice: Choice) -> Option<String> {
+    let block = blocks(text).into_iter().nth(index)?;
+    let lines: Vec<&str> = text.split('\n').collect();
+    let chosen: Vec<String> = match choice {
+        Choice::Ours => block.ours.clone(),
+        Choice::Theirs => block.theirs.clone(),
+        Choice::Both => block.ours.iter().chain(&block.theirs).cloned().collect(),
+        Choice::Base => block.base.clone()?,
+    };
+    let mut out: Vec<String> = lines[..block.start].iter().map(|s| s.to_string()).collect();
+    out.extend(chosen);
+    out.extend(lines[block.end + 1..].iter().map(|s| s.to_string()));
+    Some(out.join("\n"))
+}
 pub fn has_markers(text: &str) -> bool {
     text.lines().any(|line| ["<<<<<<<", "=======", "|||||||", ">>>>>>>"].iter().any(|prefix| line.starts_with(prefix)))
 }
@@ -131,5 +231,27 @@ pub fn resolve(root: &Path, conflict: &Conflict, resolution: Resolution) -> Resu
     match operations::invoke(root, "Mark conflict resolved", args, None, &[], false) {
         Ok(b) => Ok(b),
         Err(e) => bail!("The resolution was saved, but staging failed: {e:#}. Reopen the file to retry."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const TEXT: &str = "top\n<<<<<<< HEAD\nours 1\n||||||| base\nbase 1\n=======\ntheirs 1\n>>>>>>> topic\nmiddle\n<<<<<<< HEAD\nours 2\n=======\ntheirs 2\n>>>>>>> topic\nend\n";
+    #[test]
+    fn finds_blocks_with_and_without_a_base_and_resolves_one_at_a_time() {
+        let b = blocks(TEXT);
+        assert_eq!(b.len(), 2);
+        assert_eq!((b[0].start, b[0].end), (1, 7));
+        assert_eq!(b[0].base.as_deref(), Some(&["base 1".to_string()][..]));
+        assert_eq!(b[1].base, None);
+        let one = apply(TEXT, 0, Choice::Theirs).unwrap();
+        assert_eq!(blocks(&one).len(), 1, "only the chosen conflict changes");
+        assert!(one.starts_with("top\ntheirs 1\nmiddle\n<<<<<<<"));
+        let both = apply(&one, 0, Choice::Both).unwrap();
+        assert_eq!(both, "top\ntheirs 1\nmiddle\nours 2\ntheirs 2\nend\n");
+        assert!(!has_markers(&both));
+        assert!(apply(&one, 0, Choice::Base).is_none(), "no base recorded for this block");
+        assert!(blocks("<<<<<<< a\nunclosed\n").is_empty());
     }
 }

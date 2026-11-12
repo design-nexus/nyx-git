@@ -185,3 +185,11 @@ window.git-window .doc-tab button.tab-close image {
 .git-blame row:selected { background: @nav_active; }
 .git-blame-who { color: @theme_dim_text; font-size: 11.5px; }
 .git-blame-number { color: @theme_text_tertiary; font-size: 11.5px; font-feature-settings: "tnum"; }
+
+/* ---------- Studios ---------- */
+
+.git-rebase-cards { background: transparent; padding: 4px 12px; }
+.git-rebase-cards row { background: transparent; padding: 3px 0; }
+.git-rebase-card { background: @theme_card; border-radius: var(--nyx-radius-card); padding: 8px 12px; }
+.git-rebase-card.dropped label { text-decoration: line-through; opacity: 0.55; }
+.git-rebase-cards row:focus-within .git-rebase-card { outline: 1px solid alpha(@theme_accent, 0.5); }

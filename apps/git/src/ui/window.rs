@@ -793,7 +793,7 @@ impl Ui {
     }
     pub fn show_view(&self, name: &str) {
         let ids = self.view_switch.ids();
-        let name = if ids.contains(&name) { name } else { "history" };
+        let name = if ids.contains(&name) || super::pages::is_studio(name) { name } else { "history" };
         self.view_stack.set_visible_child_name(name);
         let details = super::pages::has_details(name);
         if details {
@@ -803,8 +803,11 @@ impl Ui {
         self.workflow.toolbar.set_visible(name == "changes");
         self.view_switch.select(name);
         self.destinations.shown(name);
-        prefs::update(|p| p.last_view = name.into());
-        self.save_repository();
+        // A studio is a task in progress, not a place to come back to on restart.
+        if !super::pages::is_studio(name) {
+            prefs::update(|p| p.last_view = name.into());
+            self.save_repository();
+        }
     }
     pub fn apply(&self, snapshot: Snapshot) {
         let previous_root = self.root();

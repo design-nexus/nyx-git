@@ -11,6 +11,8 @@ pub mod activity;
 pub mod flow;
 pub mod commit_graph;
 pub mod conflict_editor;
+pub mod conflict_studio;
+pub mod rebase_studio;
 pub mod diff_view;
 pub mod file_history;
 pub mod graph_renderer;
@@ -176,4 +178,11 @@ pub fn wrapping_button(text: &str) -> gtk::Button {
     l.set_justify(gtk::Justification::Center);
     b.set_child(Some(&l));
     b
+}
+
+/// Show the Conflict Studio, at `file` or the first conflicted file.
+pub fn conflict_studio_show(file: Option<std::path::PathBuf>) {
+    if let Some(ui) = window::current() {
+        ui.destinations.conflicts.show(file);
+    }
 }
