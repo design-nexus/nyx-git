@@ -229,6 +229,19 @@ for a in "${apps[@]}"; do
   done
   for f in "$d"/data/io.github.design_nexus.nyx.*.desktop; do install -m 644 "$f" "$desk/"; done
   for id in $ids; do install -m 644 "$src/crates/nyx-icons/apps/io.github.design_nexus.nyx.$id.svg" "$icons/"; done
+  if [[ $a == git ]]; then
+    # Git's actions for `nyx git …`, Glimpse and Nyx Assistant, and D-Bus activation so they
+    # work while Git is closed.
+    mkdir -p "$share/nyx/actions" "$share/dbus-1/services"
+    manifest=$(mktemp)
+    if timeout 10 "$bin/nyx-git" --describe-actions >"$manifest" 2>/dev/null; then
+      install -m 644 "$manifest" "$share/nyx/actions/io.github.design_nexus.nyx.Git.json"
+      printf '[D-BUS Service]\nName=io.github.design_nexus.nyx.Git\nExec=%s --gapplication-service\n' "$bin/nyx-git" >"$share/dbus-1/services/io.github.design_nexus.nyx.Git.service"
+    else
+      warn "Could not describe Git's actions; nyx git and Glimpse won't list them."
+    fi
+    rm -f "$manifest"
+  fi
   if [[ $a == news && -f ${CARGO_TARGET_DIR:-$src/target}/release/nyx-news-glimpse ]]; then
     plug="$share/nyx-news/glimpse"
     mkdir -p "$plug"

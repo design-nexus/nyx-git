@@ -28,6 +28,7 @@ done
 bin="$HOME/.local/bin"
 share="${XDG_DATA_HOME:-$HOME/.local/share}"
 config="${XDG_CONFIG_HOME:-$HOME/.config}"
+rm -f "$share/nyx/actions/io.github.design_nexus.nyx.Git.json" "$share/dbus-1/services/io.github.design_nexus.nyx.Git.service"
 for a in "${apps[@]}"; do
   case $a in
     settings) bins="nyx-settings nyx-settings-helper nyx-goa-helper" ids="Settings" ;;

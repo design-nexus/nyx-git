@@ -2143,6 +2143,7 @@ dependencies = [
  "gix",
  "gtk4",
  "libc",
+ "nyx-actions",
  "nyx-core",
  "nyx-theme",
  "nyx-ui",

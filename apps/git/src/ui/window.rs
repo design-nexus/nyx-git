@@ -893,6 +893,7 @@ impl Ui {
         }
         self.workflow.update_commit();
         self.destinations.refresh();
+        crate::control::changed();
     }
     /// Show the selected file's details and diff, unless they already are.
     /// Returns whether the diff was loaded again.
