@@ -1,6 +1,13 @@
 pub mod advanced;
+pub mod blame;
 pub mod commit_details;
+pub mod destinations;
 pub mod dev;
+pub mod layout;
+pub mod pages;
+pub mod palette;
+pub mod preview;
+pub mod activity;
 pub mod commit_graph;
 pub mod conflict_editor;
 pub mod diff_view;

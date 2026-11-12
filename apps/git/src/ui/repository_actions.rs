@@ -114,7 +114,7 @@ pub fn branches() {
                     let d = dialog.clone();
                     delete.connect_clicked(move |_| {
                     d.close(); let root = root.clone(); let name = name2.clone();
-                    confirm("Delete local branch?", &format!("Delete {name}. Git refuses branches with unmerged commits. Working files and remote branches are unchanged."), "Delete branch", move || run(&root, Operation::DeleteBranch(name.clone())));
+                    super::preview::confirm(root.clone(), nyx_git::core::preview::Subject::DeleteMergedBranch(name.clone()), "Delete local branch?".into(), format!("Delete {name}. Git refuses branches with unmerged commits. Working files and remote branches are unchanged."), "Delete branch".into(), true, move || run(&root, Operation::DeleteBranch(name.clone())));
                 });
                     actions.append(&delete);
                 }

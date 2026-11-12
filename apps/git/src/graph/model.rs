@@ -23,6 +23,9 @@ pub struct Commit {
     pub timestamp: i64,
     pub refs: Vec<Decoration>,
     pub shallow: bool,
+    /// Parents left out of a first-parent history (merged side branches).
+    #[serde(default)]
+    pub collapsed: usize,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Edge {

@@ -38,7 +38,11 @@ window.git-window .app-header .view-switch {
 
 window.git-window .app-header .view-switch button.segment {
   min-height: 26px;
-  padding: 0 14px;
+  padding: 0 12px;
+}
+
+window.git-window .app-header .view-switch button.segment image {
+  -gtk-icon-size: 14px;
 }
 
 /* ---------- Views ---------- */
@@ -168,3 +172,15 @@ window.git-window .doc-tab button.tab-close image {
 .git-commit-files row { padding: 4px 6px; border-radius: var(--nyx-radius-small); }
 .git-commit-files row:hover { background: @row_hover; }
 .git-commit-files row:selected { background: @nav_active; color: @theme_text; }
+
+/* ---------- Palette and blame ---------- */
+
+.git-palette { background: transparent; }
+.git-palette row { border-radius: var(--nyx-radius-small); padding: 6px 10px; }
+.git-palette row:selected { background: @nav_active; color: @theme_text; }
+.git-palette-detail { font-size: 11.5px; }
+.git-blame { background: @theme_bg; font-family: "JetBrains Mono", monospace; }
+.git-blame row { padding: 0 8px; min-height: 22px; }
+.git-blame row:selected { background: @nav_active; }
+.git-blame-who { color: @theme_dim_text; font-size: 11.5px; }
+.git-blame-number { color: @theme_text_tertiary; font-size: 11.5px; font-feature-settings: "tnum"; }

@@ -1,4 +1,4 @@
-use super::{window::current, workflow::ask};
+use super::window::current;
 use gtk::prelude::*;
 use nyx_git::core::{
     advanced::{self, Action, Guard, Pick, ResetMode, Step},
@@ -56,9 +56,15 @@ fn prepare_at(root: PathBuf, action: Action, effects: String) {
         move |result| match result {
             Ok((root, guard)) => {
                 let a = action.clone();
-                ask(&format!("{}?", action.label()), &effects, action.label(), destructive(&action), move || {
-                    execute(root.clone(), a.clone(), guard.clone())
-                });
+                super::preview::confirm(
+                    root.clone(),
+                    nyx_git::core::preview::Subject::Advanced(action.clone()),
+                    format!("{}?", action.label()),
+                    effects,
+                    action.label().into(),
+                    destructive(&action),
+                    move || execute(root.clone(), a.clone(), guard.clone()),
+                );
             }
             Err(e) => fail(format!("{e:#}")),
         },
@@ -336,6 +342,16 @@ fn edit_plan(root: PathBuf, base: String, original: Vec<Step>) {
     });
     body.append(&run);
     dialog.present();
+}
+/// Ask for a name, then create a branch at `id` without switching to it.
+pub fn branch_at(root: PathBuf, id: String) {
+    widgets::ask_text(
+        "Recovery branch",
+        &format!("Create a branch at {} without changing working files. Switch to it later when ready.", &id[..id.len().min(10)]),
+        "",
+        "Create branch",
+        move |name| execute_now(root.clone(), Action::BranchAt { name, target: id.clone() }),
+    );
 }
 pub(super) fn recovery() {
     let Some(root) = current().and_then(|ui| ui.root()) else { return };

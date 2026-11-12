@@ -36,6 +36,9 @@ pub struct Workflow {
     more: gtk::MenuButton,
     commit: gtk::Button,
     length: gtk::Label,
+    pub template: gtk::Button,
+    /// The repository's `commit.template`, without its comment lines.
+    pub template_text: RefCell<Option<String>>,
 }
 fn button(title: &str, tip: &str, run: impl Fn() + 'static) -> gtk::Button {
     let button = gtk::Button::with_label(title);
@@ -47,6 +50,16 @@ fn execute(operation: Operation) {
     if let Some(ui) = current() {
         ui.execute(operation);
     }
+}
+fn blame_selected() {
+    let Some(ui) = current() else { return };
+    let Some(root) = ui.root() else { return };
+    let Some(file) = ui.workflow.selected.borrow().clone() else { return };
+    if file.index == '?' || file.worktree == 'D' {
+        ui.toast("Blame needs a tracked file that's still in the working tree.");
+        return;
+    }
+    super::blame::open(root, file.path);
 }
 fn discard() {
     let Some(ui) = current() else { return };
@@ -88,6 +101,19 @@ impl Workflow {
         let category = gtk::DropDown::from_strings(&["All changes", "Unstaged", "Staged", "Untracked"]);
         category.set_tooltip_text(Some("Filter the file list by staging state"));
         toolbar.append(&category);
+        let side = gtk::ToggleButton::new();
+        side.set_icon_name("view-dual-symbolic");
+        side.add_css_class("flat");
+        side.set_tooltip_text(Some("Show diffs side by side, old and new"));
+        side.set_active(crate::prefs::get().side_by_side);
+        side.connect_toggled(|b| {
+            crate::prefs::update(|p| p.side_by_side = b.is_active());
+            if let Some(ui) = current() {
+                ui.workflow.diff.set_side_by_side(b.is_active());
+                ui.workflow.sensitive(ui.workflow.is_enabled());
+            }
+        });
+        toolbar.append(&side);
         let spacer = widgets::hbox(0);
         spacer.set_hexpand(true);
         toolbar.append(&spacer);
@@ -150,6 +176,19 @@ impl Workflow {
             );
         });
         row.append(&last);
+        let template = button("Template", "Insert the repository's commit template (commit.template), without its comment lines", || {
+            let Some(ui) = current() else { return };
+            let Some(text) = ui.workflow.template_text.borrow().clone() else { return };
+            let buffer = ui.workflow.message.buffer();
+            let mut end = buffer.end_iter();
+            if buffer.char_count() > 0 {
+                buffer.insert(&mut end, "\n");
+            }
+            buffer.insert(&mut end, &text);
+            ui.workflow.message.grab_focus();
+        });
+        template.set_visible(false);
+        row.append(&template);
         let commit = button("Commit", "Commit staged changes (Ctrl+Enter)", commit);
         commit.add_css_class("suggested-action");
         commit.set_hexpand(true);
@@ -183,7 +222,11 @@ impl Workflow {
         let hunk = button("Stage hunk", "Stage the diff hunk at the cursor", || partial(false));
         let lines = button("Stage lines", "Stage selected added or removed lines", || partial(true));
         let more = super::menu_button("view-more-symbolic", None, "More for this file", || {
-            vec![item("File history…", super::file_history::selected_change), item("Discard changes…", discard)]
+            vec![
+                item("File history…", super::file_history::selected_change),
+                item("Blame…", blame_selected),
+                item("Discard changes…", discard),
+            ]
         });
         for b in [
             resolve.upcast_ref::<gtk::Widget>(),
@@ -198,7 +241,8 @@ impl Workflow {
         }
         detail.append(&actions);
         let diff = DiffView::new();
-        detail.append(&diff.root);
+        detail.append(&diff.switchable());
+        diff.set_side_by_side(side.is_active());
         detail.set_vexpand(true);
         let me = Self {
             operation_bar,
@@ -224,6 +268,8 @@ impl Workflow {
             more,
             commit,
             length,
+            template,
+            template_text: RefCell::new(None),
         };
         me.sensitive(false);
         me
@@ -277,6 +323,7 @@ impl Workflow {
         self.staged.set_sensitive(enabled && file.is_some());
         let partial = enabled
             && !self.cached()
+            && !self.diff.side_by_side()
             && file
                 .as_ref()
                 .is_some_and(|f| f.worktree == 'M' && f.index != '?' && !f.conflicted && !f.submodule && f.original.is_none());
@@ -284,6 +331,10 @@ impl Workflow {
         self.hunk.set_sensitive(partial);
         self.lines.set_visible(!conflicted);
         self.lines.set_sensitive(partial);
+        let tip = if self.diff.side_by_side() { "Switch to the unified diff to stage parts of a file" } else { "" };
+        for (b, normal) in [(&self.hunk, "Stage the diff hunk at the cursor"), (&self.lines, "Stage selected added or removed lines")] {
+            b.set_tooltip_text(Some(if tip.is_empty() { normal } else { tip }));
+        }
         self.more.set_sensitive(enabled && file.is_some());
         drop(file);
         self.update_commit();
@@ -427,6 +478,26 @@ fn partial(lines: bool) {
 }
 
 impl super::window::Ui {
+    /// Offer the repository's commit template, read in the background.
+    pub fn load_template(&self, root: std::path::PathBuf) {
+        *self.workflow.template_text.borrow_mut() = None;
+        self.workflow.template.set_visible(false);
+        nyx_core::cmd::background(
+            move || {
+                let text = nyx_git::core::files::commit_template(&root).map(|t| {
+                    t.lines().filter(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n").trim_end().to_string()
+                });
+                (root, text.filter(|t| !t.trim().is_empty()))
+            },
+            |(root, text)| {
+                let Some(ui) = current() else { return };
+                if ui.root().as_ref() == Some(&root) {
+                    ui.workflow.template.set_visible(text.is_some());
+                    *ui.workflow.template_text.borrow_mut() = text;
+                }
+            },
+        );
+    }
     pub fn load_diff(&self) {
         let generation = self.workflow.generation.get() + 1;
         self.workflow.generation.set(generation);
@@ -474,8 +545,11 @@ impl super::window::Ui {
                                 .set_text("Diff exceeds 2 MiB. Use whole-file staging or inspect it in an external tool.");
                             return;
                         }
+                        let binary = bytes.split(|b| *b == b'\n').any(|l| l.starts_with(b"Binary files ") && l.ends_with(b" differ"));
                         ui.workflow.diff.set_text(if bytes.is_empty() {
                             "No changes on this side of the index."
+                        } else if binary {
+                            "A binary file changed. Git shows no text diff for it: stage, unstage or discard the whole file."
                         } else {
                             std::str::from_utf8(&bytes)
                                 .unwrap_or("Non-UTF-8 diff. Use whole-file staging to preserve the original bytes.")

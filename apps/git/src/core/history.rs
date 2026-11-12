@@ -45,12 +45,17 @@ pub struct Session {
 }
 impl Session {
     pub fn start(root: PathBuf, scope: Scope) -> Self {
+        Self::start_with(root, scope, false)
+    }
+    /// With `first_parent`, merges show only their first parent: merged side branches
+    /// collapse into the merge commit, which records how many parents it hides.
+    pub fn start_with(root: PathBuf, scope: Scope, first_parent: bool) -> Self {
         let (tx, requests) = mpsc::channel();
         let (events, rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
         thread::spawn(move || {
-            if let Err(e) = serve(&root, scope, requests, &events, stop.clone())
+            if let Err(e) = serve(&root, scope, first_parent, requests, &events, stop.clone())
                 && !stop.load(Ordering::Relaxed)
             {
                 let _ = events.send(Event::Error(format!("{e:#}")));
@@ -156,11 +161,15 @@ fn commit(
     parents: Vec<gix::ObjectId>,
     refs: Vec<Decoration>,
     shallow: bool,
+    first_parent: bool,
 ) -> Result<Commit> {
     let object = repo.find_object(id)?.try_into_commit()?;
     let decoded = object.decode()?;
+    let collapsed = if first_parent { parents.len().saturating_sub(1) } else { 0 };
+    let parents = if first_parent { parents.into_iter().take(1).collect() } else { parents };
     Ok(Commit {
         id: id.to_string(),
+        collapsed,
         parents: parents.into_iter().map(|id| id.to_string()).collect(),
         subject: bounded(decoded.message.to_string().lines().next().unwrap_or_default(), 4096),
         author: bounded(&decoded.author()?.name.to_string(), 512),
@@ -180,9 +189,13 @@ pub struct Cursor<'a> {
     pub done: bool,
     pub lanes: usize,
     cancel: Arc<AtomicBool>,
+    first_parent: bool,
 }
 impl<'a> Cursor<'a> {
     pub fn new(repo: &'a gix::Repository, scope: Scope, cancel: Arc<AtomicBool>) -> Result<Self> {
+        Self::with_options(repo, scope, false, cancel)
+    }
+    pub fn with_options(repo: &'a gix::Repository, scope: Scope, first_parent: bool, cancel: Arc<AtomicBool>) -> Result<Self> {
         let (refs, all_tips) = references(repo)?;
         let tips = match scope {
             Scope::All => all_tips,
@@ -198,9 +211,21 @@ impl<'a> Cursor<'a> {
         let walk = gix::traverse::commit::topo::Builder::new(find)
             .with_tips(tips)
             .sorting(gix::traverse::commit::topo::Sorting::TopoOrder)
+            .parents(if first_parent { gix::traverse::commit::Parents::First } else { gix::traverse::commit::Parents::All })
             .with_commit_graph(graph)
             .build()?;
-        Ok(Self { repo, walk, refs, shallow, layout: Layout::default(), store: Store::new()?, done: false, lanes: 1, cancel })
+        Ok(Self {
+            repo,
+            walk,
+            refs,
+            shallow,
+            layout: Layout::default(),
+            store: Store::new()?,
+            done: false,
+            lanes: 1,
+            cancel,
+            first_parent,
+        })
     }
     pub fn fill(&mut self, through: usize) -> Result<()> {
         while !self.done && self.store.len() < through {
@@ -215,6 +240,7 @@ impl<'a> Cursor<'a> {
                         info.parent_ids.into_iter().collect(),
                         self.refs.get(&info.id).cloned().unwrap_or_default(),
                         self.shallow.contains(&info.id),
+                        self.first_parent,
                     )?;
                     let row = self.layout.push(commit);
                     self.lanes = self.lanes.max(row.lanes);
@@ -254,6 +280,7 @@ impl<'a> Cursor<'a> {
 fn serve(
     root: &Path,
     scope: Scope,
+    first_parent: bool,
     requests: mpsc::Receiver<Request>,
     events: &mpsc::Sender<Event>,
     cancel: Arc<AtomicBool>,
@@ -261,7 +288,7 @@ fn serve(
     let started = std::time::Instant::now();
     let mut repo = gix::discover(root)?;
     repo.object_cache_size_if_unset(8 * 1024 * 1024);
-    let mut cursor = Cursor::new(&repo, scope, cancel.clone())?;
+    let mut cursor = Cursor::with_options(&repo, scope, first_parent, cancel.clone())?;
     let mut refs: Vec<_> = cursor.refs.values().flatten().filter(|r| r.kind != RefKind::Head).cloned().collect();
     refs.sort_by(|a, b| a.full_name.cmp(&b.full_name));
     events.send(Event::Ready { refs })?;

@@ -10,6 +10,7 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::from(code as u8);
     }
     nyx_core::app::init(nyx_core::app::App { slug: "nyx-git", name: "Git" });
+    nyx_git::core::journal::enable();
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "nyx_git=info".into()))
         .init();

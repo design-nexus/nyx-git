@@ -75,6 +75,129 @@ pub struct Frame<'a> {
     /// The commit marked for comparison.
     pub comparison: Option<&'a str>,
 }
+struct Colors {
+    bg: gdk::RGBA,
+    accent: gdk::RGBA,
+    fg: gdk::RGBA,
+    dim: gdk::RGBA,
+    lanes: [gdk::RGBA; 8],
+}
+fn colors() -> Colors {
+    let palette = nyx_theme::palette();
+    let bg = color(&palette.bg);
+    let accent = color(&palette.accent);
+    let danger = color(&palette.danger);
+    let fg = color(&palette.text);
+    let dim = color(&palette.dim_text);
+    let lanes = [
+        accent,
+        mix(&accent, &danger, 0.6),
+        mix(&accent, &fg, 0.6),
+        danger,
+        mix(&accent, &dim, 0.55),
+        mix(&danger, &fg, 0.5),
+        mix(&accent, &danger, 0.25),
+        mix(&dim, &fg, 0.6),
+    ];
+    Colors { bg, accent, fg, dim, lanes }
+}
+/// Width of a commit's column in the timeline.
+pub fn timeline_column(zoom: f64) -> f64 {
+    52.0 * zoom
+}
+/// Height of a lane in the timeline.
+pub fn lane_height(zoom: f64) -> f64 {
+    26.0 * zoom
+}
+/// Space above the lanes for ref labels, and below them for dates.
+const TIMELINE_TOP: f64 = 50.0;
+/// The timeline: commits left to right, newest first, each branch's lane a row. Same rows
+/// and edges as the graph, transposed, so the topology is the graph's exactly.
+pub fn draw_timeline(area: &gtk::DrawingArea, cr: &cairo::Context, width: f64, height: f64, frame: Frame<'_>) {
+    let Colors { bg, accent, fg, dim, lanes: colors } = colors();
+    source(cr, &bg, 1.0);
+    let _ = cr.paint();
+    let col = timeline_column(frame.zoom);
+    let lane_h = lane_height(frame.zoom);
+    let font = font(area, frame.zoom);
+    let write = Text { area, cr, font: &font };
+    let top = TIMELINE_TOP * frame.zoom;
+    let y = |lane: usize| top + lane_h / 2.0 + lane as f64 * lane_h;
+    cr.rectangle(0.0, 0.0, width, height);
+    cr.clip();
+    cr.set_line_width(2.0 * frame.zoom);
+    cr.set_line_cap(cairo::LineCap::Round);
+    let bottom = (top + frame.lanes as f64 * lane_h).min(height - 40.0 * frame.zoom);
+    let mut last_day = None;
+    for (i, row) in frame.rows.iter().enumerate() {
+        let index = frame.start + i;
+        let left = index as f64 * col - frame.offset;
+        let middle = left + col / 2.0;
+        if left + col < 0.0 || left > width {
+            continue;
+        }
+        if frame.selected == Some(index) || frame.hover == Some(index) {
+            source(cr, &mix(&bg, &accent, if frame.selected == Some(index) { 0.18 } else { 0.07 }), 1.0);
+            cr.rectangle(left, 0.0, col, height);
+            let _ = cr.fill();
+        }
+        if frame.comparison == Some(row.commit.id.as_str()) {
+            source(cr, &accent, 1.0);
+            cr.rectangle(left + 3.0, 0.0, col - 6.0, 3.0);
+            let _ = cr.fill();
+        }
+        for edge in &row.edges {
+            let from = left + col * edge.top as f64 / 2.0;
+            let to = left + col * edge.bottom as f64 / 2.0;
+            source(cr, &colors[edge.color % colors.len()], 0.9);
+            cr.move_to(from, y(edge.from));
+            cr.curve_to((from + to) / 2.0, y(edge.from), (from + to) / 2.0, y(edge.to), to, y(edge.to));
+            let _ = cr.stroke();
+        }
+        let is_head = row.commit.refs.iter().any(|r| r.kind == RefKind::Head);
+        let alpha = if frame.query.is_empty() || frame.query.matches(&row.commit) { 1.0 } else { 0.38 };
+        source(cr, &bg, 1.0);
+        cr.arc(middle, y(row.lane), 6.0 * frame.zoom, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+        source(cr, &colors[row.color % colors.len()], alpha);
+        cr.arc(middle, y(row.lane), if is_head { 5.5 * frame.zoom } else { 4.2 * frame.zoom }, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+        if row.commit.parents.len() > 1 || row.commit.collapsed > 0 || is_head || row.commit.shallow {
+            source(cr, &bg, 1.0);
+            cr.arc(middle, y(row.lane), 2.3 * frame.zoom, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+        }
+        // A branch or tag names its tip above the lanes, with a tick down to it.
+        if let Some(name) = row.commit.refs.iter().find(|r| r.kind != RefKind::Head).map(|r| r.name.as_str()) {
+            source(cr, &mix(&bg, &accent, 0.5), 1.0);
+            cr.set_line_width(1.0);
+            cr.move_to(middle, top - 4.0);
+            cr.line_to(middle, y(row.lane) - 7.0 * frame.zoom);
+            let _ = cr.stroke();
+            cr.set_line_width(2.0 * frame.zoom);
+            // Neighbouring tips take turns between two label rows.
+            let row_y = if index.is_multiple_of(2) { top * 0.3 } else { top * 0.7 };
+            write.draw(name, left + 2.0, row_y, col * 2.0 - 4.0, &accent, alpha);
+        }
+        // The day each run of commits starts, along the bottom.
+        let day = row.commit.timestamp.div_euclid(86400);
+        if last_day != Some(day) {
+            last_day = Some(day);
+            source(cr, &dim, 0.35);
+            cr.set_line_width(1.0);
+            cr.move_to(left, top);
+            cr.line_to(left, bottom + 6.0);
+            let _ = cr.stroke();
+            cr.set_line_width(2.0 * frame.zoom);
+            write.draw(&relative_time(row.commit.timestamp), left + 3.0, bottom + 16.0 * frame.zoom, col * 2.5, &dim, 1.0);
+        }
+    }
+    // The selected commit's summary at the foot.
+    if let Some(row) = frame.selected.and_then(|i| i.checked_sub(frame.start)).and_then(|i| frame.rows.get(i)) {
+        let text = format!("{} · {} · {}", &row.commit.id[..8], row.commit.subject, row.commit.author);
+        write.draw(&text, 12.0, height - 14.0 * frame.zoom, width - 24.0, &fg, 1.0);
+    }
+}
 pub fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, width: f64, height: f64, frame: Frame<'_>) {
     let palette = nyx_theme::palette();
     let bg = color(&palette.bg);
@@ -136,7 +259,7 @@ pub fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, width: f64, height: f6
         source(cr, &colors[row.color % colors.len()], 1.0);
         cr.arc(x(row.lane), middle, if is_head { 5.5 * frame.zoom } else { 4.2 * frame.zoom }, 0.0, std::f64::consts::TAU);
         let _ = cr.fill();
-        if row.commit.parents.len() > 1 || is_head || row.commit.shallow {
+        if row.commit.parents.len() > 1 || row.commit.collapsed > 0 || is_head || row.commit.shallow {
             source(cr, &bg, 1.0);
             cr.arc(x(row.lane), middle, 2.3 * frame.zoom, 0.0, std::f64::consts::TAU);
             let _ = cr.fill();

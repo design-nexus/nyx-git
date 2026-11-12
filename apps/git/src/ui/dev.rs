@@ -14,10 +14,25 @@ fn open_titled(title: &str) -> bool {
 
 /// Called after each snapshot is applied.
 pub fn after_apply(ui: &super::window::Ui) {
+    let var = |name: &str| std::env::var_os(name);
+    // NYX_GIT_PREVIEW_VIEW=flow (etc.) and NYX_GIT_PREVIEW_SELECT=0 show a page and select a
+    // changed file once, for screenshots of a test copy's main window.
+    thread_local! { static ONCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+    if !ONCE.with(|o| o.replace(true)) {
+        if let Some(view) = var("NYX_GIT_PREVIEW_VIEW") {
+            ui.show_view(&view.to_string_lossy());
+        }
+        if let Some(index) = var("NYX_GIT_PREVIEW_SELECT").and_then(|v| v.to_string_lossy().parse().ok()) {
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
+                if let Some(ui) = super::window::current() {
+                    ui.select_file(index);
+                }
+            });
+        }
+    }
     if !active() {
         return;
     }
-    let var = |name: &str| std::env::var_os(name);
     if var("NYX_GIT_PREVIEW_JOBS").is_some() {
         super::tasks::preview();
     } else if let Some(file) = var("NYX_GIT_PREVIEW_CONFLICT") {

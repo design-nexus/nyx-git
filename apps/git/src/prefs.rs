@@ -19,6 +19,14 @@ pub struct Prefs {
     pub last_view: String,
     pub accounts: Vec<nyx_git::providers::Account>,
     pub workspace: nyx_git::core::workspace::Workspace,
+    /// Pane sizes by name, see `ui::layout`.
+    pub layout: std::collections::BTreeMap<String, i32>,
+    /// History draws commits along horizontal lanes instead of the graph.
+    pub timeline: bool,
+    /// History follows first parents only, collapsing merged side branches.
+    pub first_parent: bool,
+    /// Changes shows diffs side by side.
+    pub side_by_side: bool,
 }
 impl Default for Prefs {
     fn default() -> Self {
@@ -38,6 +46,10 @@ impl Default for Prefs {
             last_view: "history".into(),
             accounts: Vec::new(),
             workspace: Default::default(),
+            layout: Default::default(),
+            timeline: false,
+            first_parent: false,
+            side_by_side: false,
         }
     }
 }

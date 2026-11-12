@@ -1,9 +1,12 @@
+pub mod activity;
 pub mod advanced;
 pub mod conflicts;
 pub mod file_history;
+pub mod files;
 pub mod history;
 pub mod initialize;
 pub mod operations;
+pub mod preview;
 pub mod remotes;
 pub mod repository;
 pub mod staging;
@@ -16,6 +19,7 @@ pub mod worktrees;
 pub mod hosting;
 
 pub mod jobs;
+pub mod journal;
 pub mod navigation;
 pub mod watch;
 

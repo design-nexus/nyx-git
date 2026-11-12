@@ -60,6 +60,10 @@ impl Sidebar {
     pub fn invalidate(&self) {
         self.dirty.set(true);
     }
+    /// The branches, tags, stashes, worktrees and remotes last read.
+    pub fn inventory(&self) -> Option<Inventory> {
+        self.data.borrow().clone()
+    }
     pub fn focus(&self) -> bool {
         self.root.is_mapped() && self.search.grab_focus()
     }

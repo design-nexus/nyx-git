@@ -137,7 +137,7 @@ pub fn show() {
                     let d = dialog.clone();
                     remove.connect_clicked(move |_|{
                     d.close();let r=r.clone();let expected=expected.clone();
-                    nyx_core::cmd::background(move||worktrees::removal_guard(&r,&expected).map(|guard|(r,expected,guard)),move|result|match result{Ok((r,expected,guard))=>confirm("Remove clean worktree?",&format!("Delete the checkout directory {} and its Git worktree registration. The associated branch remains. Dirty, ignored, locked and externally changed worktrees are refused.",expected.path.display()),"Remove worktree",move||run(r.clone(),Action::Remove{expected:expected.clone(),guard:Box::new(guard.clone())})),Err(e)=>fail(format!("{e:#}"))});
+                    nyx_core::cmd::background(move||worktrees::removal_guard(&r,&expected).map(|guard|(r,expected,guard)),move|result|match result{Ok((r,expected,guard))=>super::preview::confirm(r.clone(),nyx_git::core::preview::Subject::RemoveWorktree(expected.path.clone()),"Remove clean worktree?".into(),format!("Delete the checkout directory {} and its Git worktree registration. The associated branch remains. Dirty, ignored, locked and externally changed worktrees are refused.",expected.path.display()),"Remove worktree".into(),true,move||run(r.clone(),Action::Remove{expected:expected.clone(),guard:Box::new(guard.clone())})),Err(e)=>fail(format!("{e:#}"))});
                 });
                     actions.insert(&remove, -1);
                 }

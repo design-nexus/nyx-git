@@ -75,6 +75,8 @@ pub struct CommitGraph {
     stop: gtk::Button,
     readout: gtk::Label,
     zoom: Cell<f64>,
+    timeline: Cell<bool>,
+    first_parent: Cell<bool>,
 }
 fn graph(run: impl FnOnce(&CommitGraph)) {
     if let Some(ui) = current() {
@@ -117,6 +119,29 @@ impl CommitGraph {
         let stop = action("process-stop-symbolic", "Stop loading history or searching", || graph(|g| g.cancel()));
         stop.set_visible(false);
         toolbar.append(&stop);
+        let collapse = gtk::ToggleButton::new();
+        collapse.set_icon_name("view-conceal-symbolic");
+        collapse.add_css_class("flat");
+        collapse.set_tooltip_text(Some("Collapse merged branches: follow first parents only, so each merge stands for the branch it brought in"));
+        collapse.set_active(prefs::get().first_parent);
+        collapse.connect_toggled(|b| {
+            prefs::update(|p| p.first_parent = b.is_active());
+            graph(|g| {
+                g.first_parent.set(b.is_active());
+                g.reset(true);
+            });
+        });
+        toolbar.append(&collapse);
+        let timeline = gtk::ToggleButton::new();
+        timeline.set_icon_name("view-continuous-symbolic");
+        timeline.add_css_class("flat");
+        timeline.set_tooltip_text(Some("Timeline: commits left to right, newest first, in their branch lanes"));
+        timeline.set_active(prefs::get().timeline);
+        timeline.connect_toggled(|b| {
+            prefs::update(|p| p.timeline = b.is_active());
+            graph(|g| g.set_timeline(b.is_active()));
+        });
+        toolbar.append(&timeline);
         root.append(&toolbar);
         let canvas = gtk::DrawingArea::new();
         canvas.set_hexpand(true);
@@ -168,12 +193,32 @@ impl CommitGraph {
             stop,
             readout,
             zoom: Cell::new(zoom),
+            timeline: Cell::new(prefs::get().timeline),
+            first_parent: Cell::new(prefs::get().first_parent),
         };
         me.wire();
         me
     }
-    fn index_at(&self, y: f64) -> usize {
-        ((self.adjustment.value() + y) / row_height(self.zoom.get())).floor().max(0.0) as usize
+    /// The commit under a point: along y in the graph, along x in the timeline.
+    fn index_at(&self, x: f64, y: f64) -> usize {
+        let along = if self.timeline.get() { x } else { y };
+        ((self.adjustment.value() + along) / self.step()).floor().max(0.0) as usize
+    }
+    /// Pixels from one commit to the next.
+    fn step(&self) -> f64 {
+        if self.timeline.get() { graph_renderer::timeline_column(self.zoom.get()) } else { row_height(self.zoom.get()) }
+    }
+    /// The canvas's length in the direction commits run.
+    fn extent(&self) -> f64 {
+        (if self.timeline.get() { self.canvas.width() } else { self.canvas.height() }).max(1) as f64
+    }
+    fn set_timeline(&self, on: bool) {
+        let first = (self.adjustment.value() / self.step()).floor();
+        self.timeline.set(on);
+        self.update_adjustment();
+        self.adjustment.set_value((first * self.step()).clamp(0.0, (self.adjustment.upper() - self.adjustment.page_size()).max(0.0)));
+        self.canvas.queue_draw();
+        self.poll();
     }
     fn wire(&self) {
         let state = self.state.clone();
@@ -181,7 +226,9 @@ impl CommitGraph {
         self.canvas.set_draw_func(move |area, cr, w, h| {
             let state = state.borrow();
             let zoom = current().map_or(1.0, |ui| ui.graph.zoom.get());
-            graph_renderer::draw(
+            let timeline = current().is_some_and(|ui| ui.graph.timeline.get());
+            let draw = if timeline { graph_renderer::draw_timeline } else { graph_renderer::draw };
+            draw(
                 area,
                 cr,
                 w as f64,
@@ -243,14 +290,10 @@ impl CommitGraph {
         keys.connect_key_pressed(|_, key, _, mods| {
             let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
             match key {
-                gdk::Key::Up => graph(|g| g.move_selection(-1)),
-                gdk::Key::Down => graph(|g| g.move_selection(1)),
-                gdk::Key::Page_Up => {
-                    graph(|g| g.move_selection(-((g.canvas.height() as f64 / row_height(g.zoom.get())) as isize).max(1)))
-                }
-                gdk::Key::Page_Down => {
-                    graph(|g| g.move_selection(((g.canvas.height() as f64 / row_height(g.zoom.get())) as isize).max(1)))
-                }
+                gdk::Key::Up | gdk::Key::Left => graph(|g| g.move_selection(-1)),
+                gdk::Key::Down | gdk::Key::Right => graph(|g| g.move_selection(1)),
+                gdk::Key::Page_Up => graph(|g| g.move_selection(-((g.extent() / g.step()) as isize).max(1))),
+                gdk::Key::Page_Down => graph(|g| g.move_selection(((g.extent() / g.step()) as isize).max(1))),
                 gdk::Key::Home => graph(|g| g.select(0)),
                 gdk::Key::Menu => graph(|g| g.selected_menu()),
                 gdk::Key::F10 if mods.contains(gdk::ModifierType::SHIFT_MASK) => graph(|g| g.selected_menu()),
@@ -287,14 +330,16 @@ impl CommitGraph {
             }
         });
         self.search.add_controller(searchkeys);
-        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-        scroll.connect_scroll(|controller, _, dy| {
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+        scroll.connect_scroll(|controller, dx, dy| {
             graph(|g| {
+                // A sideways swipe moves along the timeline too.
+                let dy = if g.timeline.get() && dy == 0.0 { dx } else { dy };
                 if controller.current_event_state().contains(gdk::ModifierType::CONTROL_MASK) {
                     g.set_zoom(g.zoom.get() - dy.signum() * 0.1);
                     return;
                 }
-                let amount = if controller.unit() == gdk::ScrollUnit::Surface { dy } else { dy * row_height(g.zoom.get()) * 2.0 };
+                let amount = if controller.unit() == gdk::ScrollUnit::Surface { dy } else { dy * g.step() * 2.0 };
                 g.adjustment.set_value(
                     (g.adjustment.value() + amount).clamp(0.0, (g.adjustment.upper() - g.adjustment.page_size()).max(0.0)),
                 );
@@ -307,7 +352,7 @@ impl CommitGraph {
         click.connect_pressed(|gesture, _, x, y| {
             graph(|g| {
                 g.canvas.grab_focus();
-                let index = g.index_at(y);
+                let index = g.index_at(x, y);
                 // Ctrl+click compares the selected commit with this one, keeping the selection.
                 if gesture.current_event_state().contains(gdk::ModifierType::CONTROL_MASK) && gesture.current_button() == 1 {
                     g.compare_with(index);
@@ -321,9 +366,9 @@ impl CommitGraph {
         });
         self.canvas.add_controller(click);
         let motion = gtk::EventControllerMotion::new();
-        motion.connect_motion(|_, _, y| {
+        motion.connect_motion(|_, x, y| {
             graph(|g| {
-                let index = g.index_at(y);
+                let index = g.index_at(x, y);
                 let mut state = g.state.borrow_mut();
                 if state.hover != Some(index) {
                     state.hover = Some(index);
@@ -340,13 +385,15 @@ impl CommitGraph {
         self.canvas.add_controller(motion);
         let state = self.state.clone();
         let adjustment = self.adjustment.clone();
-        self.canvas.connect_query_tooltip(move |_, _, y, keyboard, tooltip| {
+        self.canvas.connect_query_tooltip(move |_, x, y, keyboard, tooltip| {
             let zoom = current().map_or(1.0, |ui| ui.graph.zoom.get());
+            let timeline = current().is_some_and(|ui| ui.graph.timeline.get());
+            let (along, step) = if timeline { (x, graph_renderer::timeline_column(zoom)) } else { (y, row_height(zoom)) };
             let state = state.borrow();
             let index = if keyboard {
                 state.selected.unwrap_or(0)
             } else {
-                ((adjustment.value() + y as f64) / row_height(zoom)).max(0.0) as usize
+                ((adjustment.value() + along as f64) / step).max(0.0) as usize
             };
             let Some(row) = state.row(index) else { return false };
             let refs = row.commit.refs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(" · ");
@@ -358,7 +405,13 @@ impl CommitGraph {
                 row.commit.email,
                 graph_renderer::relative_time(row.commit.timestamp),
                 if refs.is_empty() { String::new() } else { format!("\n{refs}") },
-                if row.commit.shallow { "\nShallow history boundary" } else { "" },
+                if row.commit.shallow {
+                    "\nShallow history boundary".to_string()
+                } else if row.commit.collapsed > 0 {
+                    format!("\nMerge: {} merged parent{} collapsed", row.commit.collapsed, if row.commit.collapsed == 1 { "" } else { "s" })
+                } else {
+                    String::new()
+                },
             )));
             true
         });
@@ -427,7 +480,7 @@ impl CommitGraph {
             .then(|| {
                 let s = self.state.borrow();
                 let index = s.selected?;
-                let y = index as f64 * row_height(self.zoom.get()) - self.adjustment.value();
+                let y = index as f64 * self.step() - self.adjustment.value();
                 Some(Keep { id: s.selected_id.clone()?, index, y })
             })
             .flatten();
@@ -486,7 +539,7 @@ impl CommitGraph {
             && !self.stopped.get()
             && let Some(root) = self.repository.borrow().clone()
         {
-            *self.session.borrow_mut() = Some(Session::start(root, self.scope.borrow().clone()));
+            *self.session.borrow_mut() = Some(Session::start_with(root, self.scope.borrow().clone(), self.first_parent.get()));
         }
         loop {
             let event = self.session.borrow().as_ref().and_then(Session::poll);
@@ -568,8 +621,7 @@ impl CommitGraph {
         }
         let s = self.state.borrow();
         let total = s.scanned + if s.done { 0 } else { PAGE_ROWS };
-        let range =
-            visible_range(self.adjustment.value(), self.canvas.height().max(1) as f64, row_height(self.zoom.get()), total);
+        let range = visible_range(self.adjustment.value(), self.extent(), self.step(), total);
         let count = (range.end.saturating_sub(range.start)).min(MAX_CACHE);
         let missing = count > 0 && (range.start < s.start || range.end > s.start + s.rows.len());
         drop(s);
@@ -585,7 +637,7 @@ impl CommitGraph {
             Some(index) => {
                 self.state.borrow_mut().selected = Some(index);
                 self.update_adjustment();
-                let value = index as f64 * row_height(self.zoom.get()) - keep.y;
+                let value = index as f64 * self.step() - keep.y;
                 self.adjustment.set_value(value.clamp(0.0, (self.adjustment.upper() - self.adjustment.page_size()).max(0.0)));
             }
             None => {
@@ -629,8 +681,8 @@ impl CommitGraph {
         let s = self.state.borrow();
         let count = s.scanned + if s.done { 0 } else { PAGE_ROWS };
         drop(s);
-        let height = self.canvas.height().max(1) as f64;
-        let h = row_height(self.zoom.get());
+        let height = self.extent();
+        let h = self.step();
         let upper = (count as f64 * h).max(height);
         self.adjustment.configure(self.adjustment.value().min((upper - height).max(0.0)), 0.0, upper, h, height * 0.9, height);
     }
@@ -647,13 +699,13 @@ impl CommitGraph {
             s.selected_id = new_id;
         }
         drop(s);
-        let y = index as f64 * row_height(self.zoom.get());
+        let y = index as f64 * self.step();
         let value = self.adjustment.value();
-        let height = self.canvas.height().max(1) as f64;
+        let height = self.extent();
         if y < value {
             self.adjustment.set_value(y);
-        } else if y + row_height(self.zoom.get()) > value + height {
-            self.adjustment.set_value((y - height + row_height(self.zoom.get())).max(0.0));
+        } else if y + self.step() > value + height {
+            self.adjustment.set_value((y - height + self.step()).max(0.0));
         }
         if changed && let Some(row) = row {
             let summary = format!(
@@ -695,8 +747,12 @@ impl CommitGraph {
     }
     fn selected_menu(&self) {
         let Some(index) = self.state.borrow().selected else { return };
-        let y = (index as f64 + 0.5) * row_height(self.zoom.get()) - self.adjustment.value();
-        self.context_menu(index, 24., y.clamp(0., self.canvas.height().max(1) as f64));
+        let along = ((index as f64 + 0.5) * self.step() - self.adjustment.value()).clamp(0., self.extent());
+        if self.timeline.get() {
+            self.context_menu(index, along, 24.);
+        } else {
+            self.context_menu(index, 24., along);
+        }
     }
     pub fn find(&self, backwards: bool) {
         let query = match Query::parse(&self.search.text()) {
@@ -720,7 +776,7 @@ impl CommitGraph {
         }
     }
     fn set_zoom(&self, zoom: f64) {
-        let offset = self.adjustment.value() / row_height(self.zoom.get());
+        let offset = self.adjustment.value() / self.step();
         let zoom = zoom.clamp(0.7, 1.6);
         self.zoom.set(zoom);
         prefs::update(|p| p.graph_zoom = zoom);
@@ -728,7 +784,7 @@ impl CommitGraph {
             ui.save_repository();
         }
         self.update_adjustment();
-        self.adjustment.set_value(offset * row_height(zoom));
+        self.adjustment.set_value(offset * self.step());
         self.canvas.queue_draw();
     }
     /// Compare the selected commit with the one at `index`, older first.

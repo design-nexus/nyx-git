@@ -53,6 +53,7 @@ fn node(id: &str, parents: &[&str]) -> Commit {
         timestamp: 1700000000,
         refs: Vec::new(),
         shallow: false,
+        collapsed: 0,
     }
 }
 #[test]
@@ -125,6 +126,14 @@ fn real_skewed_merge_history_labels_details_and_shallow_boundaries() {
             assert!(index[parent] > i, "Parents must always follow their children");
         }
     }
+    // First-parent history collapses the merged side branch into the merge commit.
+    let mut collapsed = Cursor::with_options(&repo, Scope::Head, true, Arc::new(AtomicBool::new(false))).unwrap();
+    collapsed.fill(100).unwrap();
+    let subjects: Vec<_> = (0..collapsed.store.len()).map(|i| collapsed.store.read(i).unwrap().commit.subject).collect();
+    assert_eq!(subjects, ["Merge", "Main", "Root"]);
+    let merge = collapsed.store.read(0).unwrap();
+    assert_eq!((merge.commit.parents.len(), merge.commit.collapsed), (1, 1));
+    assert!(collapsed.store.read(2).unwrap().edges.iter().all(|e| e.bottom != 2), "no edge leads to a hidden parent");
     let details = nyx_git::core::history::details(root, &head).unwrap();
     assert_eq!(details.parents.len(), 2);
     let files =

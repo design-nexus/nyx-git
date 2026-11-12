@@ -346,9 +346,37 @@ impl Operation {
 
 pub fn run(root: &Path, operation: Operation) -> Result<Vec<u8>> {
     if operation.mutating() && !matches!(operation, Operation::Clone { .. } | Operation::Initialize { .. }) {
-        return super::jobs::locked(root, || run_inner(root, operation));
+        return super::jobs::locked(root, || journaled(root, operation));
     }
     run_inner(root, operation)
+}
+/// Run a mutation and note it in the operation journal: the references it moved, or why it
+/// failed. Staging only changes the index and isn't journaled.
+fn journaled(root: &Path, operation: Operation) -> Result<Vec<u8>> {
+    let staging = matches!(
+        operation,
+        Operation::Stage(_)
+            | Operation::StageAll
+            | Operation::Unstage { .. }
+            | Operation::UnstageAll { .. }
+            | Operation::StageSelection { .. }
+            | Operation::ApplyPatch(_)
+            | Operation::CheckPatch(_)
+            | Operation::ResolveConflict { .. }
+    );
+    let before = if staging || !super::journal::enabled() { None } else { super::journal::refs(root).ok() };
+    // Discarding and worktree changes move no references but are worth remembering.
+    let always = match &operation {
+        Operation::Worktree(_) => true,
+        Operation::Advanced { action, .. } => matches!(**action, super::advanced::Action::Discard { .. } | super::advanced::Action::Abort),
+        _ => false,
+    };
+    let label = operation.label();
+    let result = run_inner(root, operation);
+    if let Some(before) = before {
+        super::journal::record(root, label, &before, result.as_ref().err().map(|e| format!("{e:#}")), always);
+    }
+    result
 }
 fn run_inner(root: &Path, operation: Operation) -> Result<Vec<u8>> {
     match operation {

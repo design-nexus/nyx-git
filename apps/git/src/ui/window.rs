@@ -49,7 +49,9 @@ pub struct Ui {
     pub(super) restoring: Cell<bool>,
     pub(super) view_stack: gtk::Stack,
     detail_stack: gtk::Stack,
-    view_switch: gtk::Box,
+    detail_scroll: gtk::ScrolledWindow,
+    view_switch: super::destinations::Switch,
+    pub destinations: super::pages::Pages,
     sync: Sync,
     selection: gtk::SingleSelection,
     nav: gtk::Box,
@@ -73,7 +75,11 @@ pub struct Ui {
 pub const SHORTCUTS: &[(&[&str], &str)] = &[
     (&["Ctrl", "O"], "Open repository"),
     (&["Ctrl", "Shift", "O"], "Discover repositories"),
-    (&["Ctrl", "K"], "Find repositories, favorites and groups"),
+    (&["Ctrl", "K"], "Switch repository"),
+    (&["Ctrl", "Shift", "B"], "Switch branch"),
+    (&["Ctrl", "Alt", "W"], "Open a worktree"),
+    (&["Ctrl", "P"], "Find a tracked file (history, blame)"),
+    (&["Ctrl", "1 … 5"], "Flow, Changes, History, Review, Activity"),
     (&["F5"], "Refresh status"),
     (&["Alt", "1"], "Commit history"),
     (&["Alt", "2"], "Working changes"),
@@ -157,8 +163,8 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
         nyx_ui::keys::Common {
             settings: Some(super::settings::open),
             shortcuts: Some(show_shortcuts),
+            palette: Some(super::palette::open),
             close: false,
-            ..Default::default()
         },
     );
     let nav = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -186,14 +192,15 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     search.set_valign(gtk::Align::Center);
     let (tab_strip, tabs) = super::workspace::tab_strip();
     content.append(&tab_strip);
+    let destinations = super::pages::Pages::new();
+    let ids = destinations.ids();
     let initial = nyx_theme::start_page("history", &prefs::get().last_view);
-    let view_switch = widgets::segmented(&widgets::opts(&[("history", "History"), ("changes", "Changes")]), &initial, |id| {
+    let initial = if ids.contains(&initial.as_str()) { initial } else { "history".into() };
+    let view_switch = super::destinations::Switch::new(&ids, &initial, |id| {
         if let Some(ui) = current() {
-            ui.show_view(&id);
+            ui.show_view(id);
         }
     });
-    view_switch.add_css_class("view-switch");
-    view_switch.set_valign(gtk::Align::Center);
     let sync_button = |icon: &str, tip: &str, run: fn()| {
         let b = gtk::Button::new();
         b.add_css_class("bar-button");
@@ -282,7 +289,10 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
             kind.remove_css_class("git-error");
         }
         let path = kind.next_sibling().unwrap().downcast::<gtk::Label>().unwrap();
-        path.set_text(&file.path.to_string_lossy());
+        match &file.original {
+            Some(original) => path.set_text(&format!("{} → {}", original.to_string_lossy(), file.path.to_string_lossy())),
+            None => path.set_text(&file.path.to_string_lossy()),
+        }
         path.set_tooltip_text(Some(&file.path.to_string_lossy()));
     });
     let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
@@ -343,6 +353,7 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     view_stack.set_transition_duration(if prefs::get().reduce_motion { 0 } else { 160 });
     view_stack.add_named(&graph.root, Some("history"));
     view_stack.add_named(&changes, Some("changes"));
+    destinations.add_to(&view_stack);
     let detail_stack = gtk::Stack::new();
     detail_stack.set_hhomogeneous(false);
     detail_stack.set_vhomogeneous(false);
@@ -363,6 +374,7 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
     split.set_start_child(Some(&view_stack));
     split.set_end_child(Some(&detail_scroll));
+    detail_scroll.set_visible(super::pages::has_details(&initial));
     split.set_resize_start_child(true);
     split.set_resize_end_child(false);
     split.set_shrink_start_child(false);
@@ -388,7 +400,7 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     let collapse = widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
     collapse.connect_clicked(|_| toggle_sidebar());
     header.start.append(&collapse);
-    header.center.append(&view_switch);
+    header.center.append(&view_switch.root);
     header.end.set_spacing(4);
     let readout = widgets::label("No repository open", "header-status");
     readout.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -403,15 +415,14 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     find.connect_clicked(|_| show_search());
     header.end.append(&search);
     header.end.append(&find);
-    let in_changes = initial == "changes";
-    search.set_visible(in_changes);
-    find.set_visible(!in_changes);
+    search.set_visible(initial == "changes");
+    find.set_visible(initial == "history");
     {
         let (search, find) = (search.clone(), find.clone());
         view_stack.connect_visible_child_name_notify(move |stack| {
-            let changes = stack.visible_child_name().as_deref() == Some("changes");
-            search.set_visible(changes);
-            find.set_visible(!changes);
+            let name = stack.visible_child_name();
+            search.set_visible(name.as_deref() == Some("changes"));
+            find.set_visible(name.as_deref() == Some("history"));
         });
     }
     header.end.append(&refresh);
@@ -460,7 +471,9 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
         restoring: Cell::new(false),
         view_stack,
         detail_stack,
+        detail_scroll,
         view_switch,
+        destinations,
         sync,
         selection: selection.clone(),
         nav,
@@ -565,19 +578,28 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
         let Some(ui) = current() else { return glib::Propagation::Proceed };
         match key {
             gdk::Key::q | gdk::Key::Q if ctrl => ui.window.close(),
+            gdk::Key::w | gdk::Key::W if ctrl && alt => super::palette::show(super::palette::Mode::Worktrees),
             gdk::Key::w | gdk::Key::W if ctrl => match ui.root() {
                 Some(root) => ui.close_repository(&root),
                 None => ui.window.close(),
             },
             gdk::Key::Tab | gdk::Key::ISO_Left_Tab if ctrl => ui.next_repository(shift || key == gdk::Key::ISO_Left_Tab),
-            gdk::Key::k | gdk::Key::K if ctrl => super::workspace::catalog(),
+            gdk::Key::k | gdk::Key::K if ctrl => super::palette::show(super::palette::Mode::Repositories),
             gdk::Key::_1 if alt => ui.show_view("history"),
             gdk::Key::_2 if alt => ui.show_view("changes"),
+            gdk::Key::_1 | gdk::Key::_2 | gdk::Key::_3 | gdk::Key::_4 | gdk::Key::_5 if ctrl && !shift => {
+                let n = key.to_unicode().and_then(|c| c.to_digit(10)).unwrap_or(0) as usize;
+                if let Some(d) = n.checked_sub(1).and_then(|i| super::destinations::ALL.get(i)) {
+                    ui.show_view(d.id);
+                }
+            }
             gdk::Key::Return | gdk::Key::KP_Enter if ctrl => super::workflow::commit(),
             gdk::Key::f | gdk::Key::F if ctrl && shift => ui.execute(nyx_git::core::operations::Operation::Fetch),
             gdk::Key::l | gdk::Key::L if ctrl && shift => ui.execute(nyx_git::core::operations::Operation::Pull),
             gdk::Key::p | gdk::Key::P if ctrl && alt => push(),
             gdk::Key::o | gdk::Key::O if ctrl => choose_folder(shift),
+            gdk::Key::b | gdk::Key::B if ctrl && shift => super::palette::show(super::palette::Mode::Branches),
+            gdk::Key::p | gdk::Key::P if ctrl && !shift => super::palette::show(super::palette::Mode::Files),
             gdk::Key::f | gdk::Key::F if ctrl => show_search(),
             gdk::Key::b | gdk::Key::B if ctrl => toggle_sidebar(),
             gdk::Key::F5 => ui.refresh(),
@@ -770,17 +792,17 @@ impl Ui {
         }
     }
     pub fn show_view(&self, name: &str) {
-        let name = if name == "changes" { "changes" } else { "history" };
+        let ids = self.view_switch.ids();
+        let name = if ids.contains(&name) { name } else { "history" };
         self.view_stack.set_visible_child_name(name);
-        self.detail_stack.set_visible_child_name(name);
-        self.workflow.toolbar.set_visible(name == "changes");
-        let mut button = self.view_switch.first_child();
-        while let Some(widget) = button {
-            if let Some(toggle) = widget.downcast_ref::<gtk::ToggleButton>() {
-                toggle.set_active(toggle.label().as_deref() == Some(if name == "history" { "History" } else { "Changes" }));
-            }
-            button = widget.next_sibling();
+        let details = super::pages::has_details(name);
+        if details {
+            self.detail_stack.set_visible_child_name(name);
         }
+        self.detail_scroll.set_visible(details);
+        self.workflow.toolbar.set_visible(name == "changes");
+        self.view_switch.select(name);
+        self.destinations.shown(name);
         prefs::update(|p| p.last_view = name.into());
         self.save_repository();
     }
@@ -822,6 +844,9 @@ impl Ui {
         self.update_readout();
         if previous_root != self.root() {
             self.rebuild_navigation();
+            if let Some(root) = self.root() {
+                self.load_template(root);
+            }
         }
         self.update_tasks();
         if let Some(snapshot) = self.snapshot.borrow().as_ref() {
@@ -864,6 +889,7 @@ impl Ui {
             self.load_diff();
         }
         self.workflow.update_commit();
+        self.destinations.refresh();
     }
     /// Show the selected file's details and diff, unless they already are.
     /// Returns whether the diff was loaded again.
@@ -876,6 +902,10 @@ impl Ui {
         self.details.set_text(&file.as_ref().map_or_else(|| "Select a changed file to inspect its status.".into(), describe));
         self.workflow.select(file);
         true
+    }
+    /// Select the `index`th file in the Changes list.
+    pub fn select_file(&self, index: u32) {
+        self.selection.set_selected(index);
     }
     pub fn update_readout(&self) {
         let snapshot = self.snapshot.borrow();
@@ -1034,7 +1064,8 @@ impl Ui {
         let width = if self.window.width() > 0 { self.window.width() } else { self.window.default_width() };
         let compact = width < 980 || prefs::get().sidebar_collapsed;
         nyx_ui::settings_card::fit(&self.window);
-        self.readout.set_visible(width >= 980);
+        self.readout.set_visible(width >= 1180);
+        self.view_switch.set_compact(width < 980);
         if self.compact.replace(Some(compact)) != Some(compact) {
             if compact {
                 self.nav.add_css_class("compact");
