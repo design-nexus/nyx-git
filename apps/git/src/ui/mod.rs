@@ -8,6 +8,7 @@ pub mod pages;
 pub mod palette;
 pub mod preview;
 pub mod activity;
+pub mod flow;
 pub mod commit_graph;
 pub mod conflict_editor;
 pub mod diff_view;
@@ -150,4 +151,29 @@ pub fn menu_button(icon: &str, label: Option<&str>, tooltip: &str, build: impl F
     button.set_valign(gtk::Align::Center);
     button.set_create_popup_func(move |b| b.set_popover(Some(&menu(build()))));
     button
+}
+
+/// Open a web page in the default browser.
+pub fn open_url(url: &str) {
+    let launcher = gtk::UriLauncher::new(url);
+    let parent = window::current().map(|ui| ui.window.clone());
+    launcher.launch(parent.as_ref(), gtk::gio::Cancellable::NONE, |result| {
+        if let Err(e) = result
+            && let Some(ui) = window::current()
+        {
+            ui.error(&format!("Could not open the page: {e}"));
+        }
+    });
+}
+
+/// A button whose label wraps, for narrow inspectors: its text never sets the pane's width.
+pub fn wrapping_button(text: &str) -> gtk::Button {
+    use gtk::prelude::*;
+    let b = gtk::Button::new();
+    let l = gtk::Label::new(Some(text));
+    l.set_wrap(true);
+    l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    l.set_justify(gtk::Justification::Center);
+    b.set_child(Some(&l));
+    b
 }

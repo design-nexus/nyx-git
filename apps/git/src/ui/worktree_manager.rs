@@ -167,7 +167,47 @@ pub fn show() {
         },
     );
 }
+/// Remove the worktree at `path` after the usual guards and a preview, from outside the manager.
+pub fn remove_at(root: PathBuf, path: PathBuf) {
+    nyx_core::cmd::background(
+        move || -> anyhow::Result<_> {
+            let expected = worktrees::list(&root)?.into_iter().find(|w| w.path == path).ok_or_else(|| anyhow::anyhow!("The worktree is no longer registered"))?;
+            let guard = worktrees::removal_guard(&root, &expected)?;
+            Ok((root, expected, guard))
+        },
+        move |result| match result {
+            Ok((root, expected, guard)) => super::preview::confirm(
+                root.clone(),
+                nyx_git::core::preview::Subject::RemoveWorktree(expected.path.clone()),
+                "Remove clean worktree?".into(),
+                format!("Delete the checkout directory {} and its Git worktree registration. The associated branch remains.", expected.path.display()),
+                "Remove worktree".into(),
+                true,
+                move || {
+                    let Some(ui) = current() else { return };
+                    let path = expected.path.clone();
+                    ui.execute_at_then(
+                        root.clone(),
+                        Operation::Worktree(Action::Remove { expected: expected.clone(), guard: Box::new(guard.clone()) }),
+                        move |result| {
+                            if result.is_ok()
+                                && let Some(ui) = current()
+                            {
+                                ui.close_repository(&path);
+                            }
+                        },
+                    );
+                },
+            ),
+            Err(e) => fail(format!("{e:#}")),
+        },
+    );
+}
 fn create_dialog(root: PathBuf) {
+    create_for(root, None, None);
+}
+/// Create a worktree: for an existing `branch`, or a new branch from `base`.
+pub fn create_for(root: PathBuf, branch_name: Option<String>, base_target: Option<String>) {
     nyx_core::cmd::background(
         move || operations::run(&root, Operation::Branches).map(|branches| (root, branches)),
         move |result| {
@@ -201,7 +241,15 @@ fn create_dialog(root: PathBuf) {
             location.append(&browse);
             body.append(&location);
             let new_branch = gtk::CheckButton::with_label("Create a new branch");
-            new_branch.set_active(true);
+            new_branch.set_active(branch_name.is_none());
+            // Suggest a sibling folder of the main checkout, named after the branch.
+            let slug = |b: &str| b.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect::<String>();
+            if let Some(b) = &branch_name
+                && let Some(parent) = root.parent()
+            {
+                let name = root.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                path.set_text(&parent.join(format!("{name}-{}", slug(b))).to_string_lossy());
+            }
             body.append(&new_branch);
             let branch = gtk::Entry::new();
             branch.set_placeholder_text(Some("New branch name"));
@@ -209,12 +257,17 @@ fn create_dialog(root: PathBuf) {
             let names = String::from_utf8_lossy(&branches).lines().map(String::from).collect::<Vec<_>>();
             let existing = gtk::DropDown::from_strings(&names.iter().map(String::as_str).collect::<Vec<_>>());
             super::compact_dropdown(&existing);
-            existing.set_visible(false);
+            existing.set_visible(branch_name.is_some());
+            if let Some(i) = branch_name.as_ref().and_then(|b| names.iter().position(|n| n == b)) {
+                existing.set_selected(i as u32);
+            }
             body.append(&existing);
             let base = gtk::Entry::new();
             base.set_placeholder_text(Some("Start from branch, tag, full hash or HEAD"));
-            base.set_text("HEAD");
+            base.set_text(base_target.as_deref().unwrap_or("HEAD"));
             body.append(&base);
+            branch.set_visible(branch_name.is_none());
+            base.set_visible(branch_name.is_none());
             let b = branch.clone();
             let e = existing.clone();
             let start = base.clone();

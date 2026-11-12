@@ -322,7 +322,7 @@ impl Activity {
         let actions = widgets::vbox(6);
         let mut offered = false;
         let mut offer = |label: &str, id: &str| {
-            let b = gtk::Button::with_label(label);
+            let b = super::wrapping_button(label);
             b.set_tooltip_text(Some(id));
             let (r, id) = (root.clone(), id.to_string());
             b.connect_clicked(move |_| super::advanced::branch_at(r.clone(), id.clone()));

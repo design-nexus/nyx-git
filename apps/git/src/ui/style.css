@@ -54,6 +54,7 @@ window.git-window .app-header .view-switch button.segment image {
 .git-files row:selected { background: @nav_active; }
 .git-details { padding: 8px 16px; background: @theme_bg; }
 .git-error { color: @theme_danger; }
+.git-warning { color: @theme_warning; }
 .git-actions { padding: 6px 12px; }
 .git-actions flowboxchild { padding: 0; }
 .git-composer { padding: 12px 14px 14px; }

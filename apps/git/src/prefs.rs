@@ -27,6 +27,8 @@ pub struct Prefs {
     pub first_parent: bool,
     /// Changes shows diffs side by side.
     pub side_by_side: bool,
+    /// Flow lists its cards beside the canvas.
+    pub flow_list: bool,
 }
 impl Default for Prefs {
     fn default() -> Self {
@@ -50,6 +52,7 @@ impl Default for Prefs {
             timeline: false,
             first_parent: false,
             side_by_side: false,
+            flow_list: false,
         }
     }
 }
