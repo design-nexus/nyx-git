@@ -388,8 +388,9 @@ fn heading(root: &Path, kind: Kind, title: &str, add: &str, count: usize, fold: 
         });
         row.append(&plus);
     }
-    // The group's colour from the theme's [sections.git]: worktrees, branches, …
-    nyx_ui::sidebar::set_section(&row, &title.to_lowercase());
+    // The first group in the app's accent, the others from the theme's [sections.git].
+    let section = if first { nyx_ui::sidebar::ACCENT_SECTION.to_string() } else { title.to_lowercase() };
+    nyx_ui::sidebar::set_section(&row, &section);
     row
 }
 /// `+` on a group.

@@ -9,8 +9,8 @@ repository.workspace = true
 [dependencies]
 nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "918729504918ec344b3a853a5ce0ea2c9dbb7b5f" }
 nyx-actions = { git = "https://github.com/design-nexus/nyx-core.git", rev = "918729504918ec344b3a853a5ce0ea2c9dbb7b5f", default-features = false }
-nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "7415428404b0f591e3e7e5215c4aa385d99385c6" }
-nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "7415428404b0f591e3e7e5215c4aa385d99385c6" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "05289df9dfffddbf6402fe16cdc398569eb34956" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "05289df9dfffddbf6402fe16cdc398569eb34956" }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 gix = { version = "0.85", default-features = false, features = ["sha1", "sha256"] }
 sourceview5 = "0.11"
