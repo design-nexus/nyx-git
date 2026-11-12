@@ -24,7 +24,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             mode: ThemeMode::Omarchy,
-            theme: "tokyo-night".into(),
+            theme: nyx_theme::DEFAULT_THEME.into(),
             glow: true,
             reduce_motion: false,
             show_scrollbars: false,
