@@ -873,20 +873,6 @@ window.git-window button.git-welcome-row image {
 .git-sidebar-section { padding-top: 6px; margin-top: 10px; }
 .git-sidebar-section > title { padding: 6px 4px; color: @theme_text_tertiary; }
 
-/* Blended: the view and its details meet without a line (the divider still drags). */
-window.git-window paned > separator {
-  min-width: 6px;
-  min-height: 6px;
-  background: @theme_bg;
-  background-image: none;
-  border: none;
-  box-shadow: none;
-}
-
-window.git-window paned > separator:hover {
-  background: alpha(@theme_accent, 0.25);
-}
-
 /* An error's toast is tinted; Details opens all of what Git said. */
 .toast.git-error-toast {
   background: mix(@theme_surface, @theme_danger, 0.12);
