@@ -1,6 +1,7 @@
 //! Ctrl+Shift+P: one box for every destination, command, repository, branch, tag,
-//! worktree and tracked file. The quick switchers are the same box narrowed to one kind:
-//! Ctrl+K repositories, Ctrl+Shift+B branches, Ctrl+Alt+W worktrees, Ctrl+P files.
+//! worktree and tracked file. The same box narrowed to one kind: Ctrl+Alt+W worktrees,
+//! Ctrl+P files. Repositories (Ctrl+K) and branches (Ctrl+Shift+B) have the header's
+//! switchers.
 use super::window::current;
 use gtk::{gdk, glib, pango, prelude::*};
 use nyx_git::core::navigation::{Action, Kind as Group};
@@ -15,8 +16,6 @@ const FILES: usize = 50_000;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     All,
-    Repositories,
-    Branches,
     Worktrees,
     Files,
 }
@@ -222,8 +221,6 @@ fn rank(entries: &[Entry], query: &str, mode: Mode) -> Vec<Entry> {
     if q.is_empty() {
         let first = match mode {
             Mode::All => &[Kind::Page, Kind::Command][..],
-            Mode::Repositories => &[Kind::Repository],
-            Mode::Branches => &[Kind::Branch],
             Mode::Worktrees => &[Kind::Worktree],
             Mode::Files => &[Kind::File],
         };
@@ -263,18 +260,6 @@ fn entries(mode: Mode) -> Vec<Entry> {
             all.extend(inventory());
             all
         }
-        Mode::Repositories => {
-            let mut all = repositories();
-            all.push(entry(
-                Kind::Repository,
-                "starred-symbolic",
-                "Favorites and groups…",
-                "Manage the sidebar's repositories",
-                super::workspace::catalog,
-            ));
-            all
-        }
-        Mode::Branches => inventory().into_iter().filter(|e| matches!(e.kind, Kind::Branch | Kind::Tag)).collect(),
         Mode::Worktrees => inventory().into_iter().filter(|e| e.kind == Kind::Worktree).collect(),
         Mode::Files => Vec::new(),
     }
@@ -303,8 +288,6 @@ pub fn show(mode: Mode) {
     let Some(ui) = current() else { return };
     let (title, placeholder) = match mode {
         Mode::All => ("Go to", "Pages, commands, repositories, branches, worktrees"),
-        Mode::Repositories => ("Repositories", "Open tabs, favorites and recent repositories"),
-        Mode::Branches => ("Branches", "Switch to a branch · Alt+Enter shows its history"),
         Mode::Worktrees => ("Worktrees", "Open a worktree of this repository"),
         Mode::Files => ("Files", "Tracked files: Enter shows history · Alt+Enter blame"),
     };
@@ -458,6 +441,6 @@ mod tests {
         let got: Vec<_> = rank(&entries, "graph commit", Mode::All).into_iter().map(|e| e.title).collect();
         assert_eq!(got, ["History"]);
         assert_eq!(rank(&entries, "", Mode::All).len(), 2);
-        assert_eq!(rank(&entries, "", Mode::Branches).len(), 1);
+        assert_eq!(rank(&entries, "", Mode::Files).len(), 1);
     }
 }

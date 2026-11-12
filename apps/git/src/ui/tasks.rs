@@ -156,7 +156,7 @@ impl Ui {
         if enabled != self.workflow.is_enabled() {
             self.workflow.sensitive(enabled);
         }
-        self.refresh.set_sensitive(!loading && !blocked);
+        self.header.set_loading(loading);
         self.update_sync();
     }
     pub fn task_finished(self: &std::rc::Rc<Self>, id: u64, result: Result<(), String>) {

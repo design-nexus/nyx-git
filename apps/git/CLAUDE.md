@@ -10,22 +10,31 @@
 - `src/app.rs`: `Ui::open` (user: disables actions while reading), `Ui::reload` (file
   watcher: quiet, may reuse the watch plan) and `execute_at_then` for operations.
   `loads` drops a status read that an operation overtook.
-- `src/ui/window.rs` builds the window and owns `apply` (in-place file list), the header
-  and notices (`toast` fades; `error` stays). The unified header: the app with the
-  repository and branch as its subtitle and the sidebar toggle; the five destinations in
-  the middle (`ui::destinations`, Ctrl+1–5, icons only under 980 px); what's changed
-  (hidden under 1180 px), Fetch/Pull/Push, the repository menu, search, refresh and
-  Settings. Repository tabs sit under the header.
+- `src/ui/window.rs` builds the window and owns `apply` (in-place file list) and notices
+  (`nyx_ui::toast`; `error` adds Details with all of Git's text). The header
+  (`ui::header`, direction A of `nyx-design/mockups/git`): the repository switcher
+  (Ctrl+K) and branch chip (Ctrl+Shift+B), both popovers; the five destinations centred,
+  equal segments (`ui::destinations`, Ctrl+1–5, icons only under 1180 px); Sync (one split
+  button: Pull, Push, Publish or Fetch by state, ▾ for all), Go to (the palette), ⋯ (F10,
+  the repository's tools) and Settings. Neither end may outgrow what the centre leaves it,
+  so the destinations never move. Repository tabs (`nyx_ui::tabs`) only with 2+ open.
+- Every page starts with `ui::pagebar` (44 px: mode, search with a key hint, actions; its
+  start clips rather than widening the window) and inspects with `ui::inspector` (title,
+  groups, key/value rows, action rows: one primary, danger in red). Changes is
+  `ui::changes` (files grouped by state, a file in both Staged and Changes when it's
+  both) beside `ui::workflow` (diff bar, diff, composer card, operation banner).
+  The sidebar (`ui::sidebar`): Worktrees, Branches, Remotes, Tags, Stashes, folding,
+  `+` to make one. Icons are `git-*-symbolic` (`ui::icons`, from the mockups' set by
+  `tools/icons.py`, installed to the cache by `theme::install`).
 - Pages (`ui::pages::Pages`, `ui.destinations`): Flow (`ui::flow`, over `core::flow`),
   Review (`ui::review`, over `providers::review`), Activity (`ui::activity`, over
   `core::activity`), and two studios not in the header: Rebase (`ui::rebase_studio`)
-  and Conflicts (`ui::conflict_studio`). History and Changes keep the shared details pane.
+  and Conflicts (`ui::conflict_studio`). Only History uses the window's shared details pane.
 - Safety: every mutation through `operations::run` is journaled (`core::journal`, under
   `$XDG_STATE_HOME/nyx-git/journal/`, on only when `journal::enable()` ran: the app, not
   tests). History-changing and destructive actions confirm through `ui::preview` over
   `core::preview`. Recovery makes branches; nothing resets automatically.
-- Ctrl+Shift+P is the typed palette (`ui::palette`); Ctrl+K repositories, Ctrl+Shift+B
-  branches, Ctrl+Alt+W worktrees, Ctrl+P files. Pane sizes persist via `ui::layout`.
+- Ctrl+Shift+P is the typed palette (`ui::palette`); Ctrl+Alt+W worktrees, Ctrl+P files. Pane sizes persist via `ui::layout`.
   `ui::menu`/`popup_at`/`menu_button` are the app's menus; `ui::dev` holds the
   `NYX_GIT_SNAPSHOT`/`NYX_GIT_PREVIEW_*` developer previews.
 - **Control** (`src/control.rs`, API 2, namespace `repo`, alias `git`): status, repos,

@@ -22,26 +22,43 @@ pub struct Activity {
     kind: gtk::DropDown,
     kinds: RefCell<Vec<Option<Kind>>>,
     readout: gtk::Label,
-    inspector: gtk::Box,
+    inspector: super::inspector::Inspector,
     loaded: RefCell<Option<PathBuf>>,
     generation: Cell<u64>,
 }
 fn icon(kind: Kind) -> &'static str {
     match kind {
-        Kind::Commit => "object-select-symbolic",
-        Kind::Branch => "media-playlist-consecutive-symbolic",
-        Kind::Checkout => "go-jump-symbolic",
-        Kind::Fetch => "network-receive-symbolic",
-        Kind::Pull => "go-down-symbolic",
-        Kind::Push => "go-up-symbolic",
-        Kind::Merge | Kind::Rebase | Kind::CherryPick | Kind::Revert => "system-run-symbolic",
-        Kind::Reset | Kind::Discard => "edit-undo-symbolic",
-        Kind::Stash => "folder-symbolic",
-        Kind::Worktree => "folder-open-symbolic",
-        Kind::Tag => "bookmark-new-symbolic",
-        Kind::Recovery => "edit-undo-symbolic",
-        Kind::Other => "emblem-system-symbolic",
+        Kind::Commit => "git-commit-symbolic",
+        Kind::Branch | Kind::Checkout => "git-branch-symbolic",
+        Kind::Fetch | Kind::Pull => "git-down-symbolic",
+        Kind::Push => "git-up-symbolic",
+        Kind::Merge => "git-merge-symbolic",
+        Kind::Rebase => "git-rebase-symbolic",
+        Kind::CherryPick => "git-cherry-symbolic",
+        Kind::Revert | Kind::Reset | Kind::Discard | Kind::Recovery => "git-undo-symbolic",
+        Kind::Stash => "git-stash-symbolic",
+        Kind::Worktree => "git-worktree-symbolic",
+        Kind::Tag => "git-tag-symbolic",
+        Kind::Other => "git-activity-symbolic",
     }
+}
+/// The local day `time` falls on, for the list's headings.
+fn day(time: i64) -> i64 {
+    glib::DateTime::from_unix_local(time).map(|d| (d.year() as i64) * 400 + d.day_of_year() as i64).unwrap_or(0)
+}
+/// "Today", "Yesterday", or the date.
+fn day_title(time: i64) -> String {
+    let now = glib::DateTime::now_local().map(|d| d.to_unix()).unwrap_or(time);
+    if day(time) == day(now) {
+        "Today".into()
+    } else if day(time) == day(now - 86400) {
+        "Yesterday".into()
+    } else {
+        glib::DateTime::from_unix_local(time).and_then(|d| d.format("%A, %e %B")).map(|s| s.to_string()).unwrap_or_default()
+    }
+}
+fn event_of(o: &glib::Object) -> Option<Event> {
+    o.downcast_ref::<glib::BoxedAnyObject>().map(|o| o.borrow::<Event>().clone())
 }
 fn when(time: i64) -> String {
     glib::DateTime::from_unix_local(time).and_then(|d| d.format("%Y-%m-%d %H:%M:%S")).map(|s| s.to_string()).unwrap_or_default()
@@ -51,8 +68,7 @@ impl Activity {
         let root = widgets::vbox(0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        let toolbar = widgets::hbox(6);
-        toolbar.add_css_class("git-history-search");
+        let toolbar = super::pagebar::PageBar::new();
         let source = Rc::new(Cell::new(0u8));
         let s = source.clone();
         let sources = widgets::segmented(&widgets::opts(&[("all", "All"), ("journal", "Nyx Git"), ("reflog", "Git reflog")]), "all", move |id| {
@@ -65,28 +81,34 @@ impl Activity {
                 ui.destinations.activity.refilter();
             }
         });
+        sources.add_css_class("git-segments");
         sources.set_tooltip_text(Some("Nyx Git: operations it ran and recorded. Git reflog: HEAD's moves, by any Git tool."));
-        toolbar.append(&sources);
+        toolbar.start(&sources);
         let kind = gtk::DropDown::from_strings(&["All kinds"]);
         super::compact_dropdown(&kind);
+        kind.add_css_class("git-dropdown");
         kind.set_tooltip_text(Some("Show one kind of activity"));
-        toolbar.append(&kind);
+        toolbar.start(&kind);
         let search = gtk::SearchEntry::new();
-        search.set_hexpand(true);
-        search.set_placeholder_text(Some("Filter activity"));
-        toolbar.append(&search);
-        let refresh = widgets::bar_button("view-refresh-symbolic", "Read activity again");
+        toolbar.start(&super::pagebar::search(&search, "Filter activity", "", 16));
+        let refresh = widgets::bar_button("git-refresh-symbolic", "Read activity again");
         refresh.connect_clicked(|_| {
             if let Some(ui) = current() {
                 ui.destinations.activity.load(true);
             }
         });
-        toolbar.append(&refresh);
-        root.append(&toolbar);
+        toolbar.end(&refresh);
+        root.append(&toolbar.root);
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let filter = gtk::CustomFilter::new(|_| true);
         let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
-        let selection = gtk::SingleSelection::new(Some(filtered));
+        // A heading for each day, newest first (the events already are).
+        let sorted = gtk::SortListModel::new(Some(filtered), None::<gtk::Sorter>);
+        sorted.set_section_sorter(Some(&gtk::CustomSorter::new(|a, b| {
+            let (a, b) = (event_of(a).map(|e| day(e.time)), event_of(b).map(|e| day(e.time)));
+            b.cmp(&a).into()
+        })));
+        let selection = gtk::SingleSelection::new(Some(sorted));
         selection.set_autoselect(false);
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
@@ -95,19 +117,19 @@ impl Activity {
             row.add_css_class("git-activity-row");
             let image = gtk::Image::new();
             row.append(&image);
-            let text = widgets::vbox(0);
+            let text = widgets::vbox(1);
             text.set_hexpand(true);
-            let title = widgets::label("", "");
+            let title = widgets::label("", "git-activity-title");
             title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            let detail = widgets::label("", "dim-label");
-            detail.add_css_class("git-palette-detail");
+            let detail = widgets::label("", "git-activity-detail");
             detail.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
             text.append(&title);
             text.append(&detail);
             row.append(&text);
-            let source = widgets::tag("", "");
+            let source = widgets::label("", "git-pill");
+            source.set_valign(gtk::Align::Center);
             row.append(&source);
-            let time = widgets::label("", "dim-label");
+            let time = widgets::label("", "git-activity-time");
             time.set_width_chars(5);
             time.set_xalign(1.0);
             row.append(&time);
@@ -129,13 +151,31 @@ impl Activity {
             }
             title.next_sibling().and_downcast::<gtk::Label>().unwrap().set_text(&e.detail);
             let tag = text.next_sibling().and_downcast::<gtk::Label>().unwrap();
-            tag.set_text(if e.source == Source::Journal { "Nyx Git" } else { "reflog" });
+            tag.set_text(if e.source == Source::Journal { "Nyx Git" } else { "Git reflog" });
+            if e.source == Source::Journal {
+                tag.add_css_class("acc");
+            } else {
+                tag.remove_css_class("acc");
+            }
             let time = tag.next_sibling().and_downcast::<gtk::Label>().unwrap();
-            time.set_text(&super::graph_renderer::relative_time(e.time));
-            time.set_tooltip_text(Some(&when(e.time)));
+            time.set_text(&glib::DateTime::from_unix_local(e.time).and_then(|d| d.format("%H:%M")).map(|s| s.to_string()).unwrap_or_default());
+            time.set_tooltip_text(Some(&format!("{} · {}", when(e.time), super::graph_renderer::ago(e.time))));
         });
         let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
+        let headers = gtk::SignalListItemFactory::new();
+        headers.connect_setup(|_, h| {
+            let h = h.downcast_ref::<gtk::ListHeader>().unwrap();
+            h.set_child(Some(&widgets::label("", "git-day-head")));
+        });
+        headers.connect_bind(|_, h| {
+            let h = h.downcast_ref::<gtk::ListHeader>().unwrap();
+            if let (Some(e), Some(label)) = (h.item().and_then(|o| event_of(&o)), h.child().and_downcast::<gtk::Label>()) {
+                label.set_text(&day_title(e.time).to_uppercase());
+            }
+        });
+        list.set_header_factory(Some(&headers));
         list.add_css_class("git-files");
+        list.add_css_class("git-activity");
         list.update_property(&[gtk::accessible::Property::Label("Repository activity")]);
         let scroll = gtk::ScrolledWindow::builder()
             .vscrollbar_policy(super::scrollbars::policy())
@@ -144,13 +184,12 @@ impl Activity {
             .hexpand(true)
             .child(&list)
             .build();
-        let inspector = widgets::vbox(8);
-        inspector.add_css_class("git-details");
+        let inspector = super::inspector::Inspector::new();
         let inspector_scroll = gtk::ScrolledWindow::builder()
             .vscrollbar_policy(super::scrollbars::policy())
             .hscrollbar_policy(gtk::PolicyType::Never)
             .min_content_width(260)
-            .child(&inspector)
+            .child(&inspector.root)
             .build();
         let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
         paned.set_start_child(Some(&scroll));
@@ -292,46 +331,37 @@ impl Activity {
         }
     }
     fn inspect(&self, e: Option<&Event>) {
-        while let Some(c) = self.inspector.first_child() {
-            self.inspector.remove(&c);
-        }
+        let insp = &self.inspector;
+        insp.clear();
         let Some(e) = e else {
-            let l = widgets::label("Select an event to see what changed and what can be recovered.", "dim-label");
-            l.set_wrap(true);
-            self.inspector.append(&l);
+            insp.note("Select an event to see what changed and what can be recovered.");
             return;
         };
-        let add = |text: &str, class: &str| {
-            let l = widgets::label(text, class);
-            l.set_wrap(true);
-            l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            l.set_selectable(true);
-            self.inspector.append(&l);
-        };
-        add(&e.title, "section-title");
-        add(&format!("{} · {}", when(e.time), e.kind.title()), "dim-label");
-        add(&e.detail, if e.ok { "" } else { "git-error" });
-        add(
-            match e.source {
-                Source::Journal => "Recorded by Nyx Git when it ran this operation, with every reference it moved.",
-                Source::Reflog => "From Git's reflog: HEAD moved here. Any Git tool may have done it; Nyx Git knows only what the reflog says.",
-            },
-            "dim-label",
-        );
+        insp.title(Some(icon(e.kind)), &e.title);
+        insp.sub(&format!("{} · {}", when(e.time), e.kind.title()));
+        let detail = insp.text(&e.detail);
+        if !e.ok {
+            detail.add_css_class("bad");
+        }
+        insp.note(match e.source {
+            Source::Journal => "Recorded by Nyx Git when it ran this, with every reference it moved.",
+            Source::Reflog => "From Git's reflog: HEAD moved here. Any Git tool may have done it; Nyx Git knows only what the reflog says.",
+        });
         if !e.changes.is_empty() {
-            add("REFERENCES", "group-title");
+            insp.group("References");
             for c in &e.changes {
-                let s = |v: &Option<String>| v.as_deref().map_or("none".to_string(), |v| v[..v.len().min(10)].to_string());
-                add(&format!("{}: {} → {}", activity::short(&c.name), s(&c.before), s(&c.after)), "");
+                let s = |v: &Option<String>| v.as_deref().map_or("none".to_string(), |v| v[..v.len().min(7)].to_string());
+                let value = insp.kv(&activity::short(&c.name), &format!("{} → {}", s(&c.before), s(&c.after)), "");
+                value.add_css_class("git-hash");
             }
         }
         let Some(root) = current().and_then(|ui| ui.root()) else { return };
-        add("RECOVERY", "group-title");
-        add("A branch at a commit keeps it; nothing else changes. Uncommitted work that was lost isn't in Git and can't be brought back here.", "dim-label");
-        let actions = widgets::vbox(6);
+        insp.group("Recovery");
+        insp.note("A branch at a commit keeps it; nothing else changes. Uncommitted work that was lost isn't in Git and can't be brought back here.");
+        let actions = insp.actions();
         let mut offered = false;
         let mut offer = |label: &str, id: &str| {
-            let b = super::wrapping_button(label);
+            let b = super::inspector::action("git-branch-symbolic", label, super::inspector::Style::Plain);
             b.set_tooltip_text(Some(id));
             let (r, id) = (root.clone(), id.to_string());
             b.connect_clicked(move |_| super::advanced::branch_at(r.clone(), id.clone()));
@@ -339,7 +369,7 @@ impl Activity {
             offered = true;
         };
         if let Some(before) = e.before.as_deref() {
-            offer(&format!("Branch at the earlier commit {}…", &before[..before.len().min(8)]), before);
+            offer(&format!("Branch at the earlier commit {}…", &before[..before.len().min(7)]), before);
         }
         for c in e.changes.iter().filter(|c| c.name != "HEAD" && c.after.is_none()) {
             if let Some(b) = c.before.as_deref().filter(|b| Some(*b) != e.before.as_deref()) {
@@ -347,14 +377,22 @@ impl Activity {
             }
         }
         if let Some(after) = e.after.as_deref() {
-            let copy = gtk::Button::with_label("Copy commit hash");
+            let copy = super::inspector::action("git-copy-symbolic", "Copy commit hash", super::inspector::Style::Plain);
             let id = after.to_string();
             copy.connect_clicked(move |b| b.display().clipboard().set_text(&id));
             actions.append(&copy);
+            let show = super::inspector::action("git-history-symbolic", "Show in History", super::inspector::Style::Plain);
+            let id = after.to_string();
+            show.connect_clicked(move |_| {
+                if let Some(ui) = current() {
+                    ui.show_view("history");
+                    ui.graph.show_reference(id.clone());
+                }
+            });
+            actions.append(&show);
         }
         if !offered {
-            add("Nothing to recover from this event.", "dim-label");
+            insp.note("Nothing to recover from this event.");
         }
-        self.inspector.append(&actions);
     }
 }

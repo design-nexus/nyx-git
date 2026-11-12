@@ -27,8 +27,8 @@ impl Ui {
         self.loads.set(generation);
         if !quiet {
             self.readout.set_text("Reading repository…");
-            self.refresh.set_sensitive(false);
             self.workflow.sensitive(false);
+            self.header.set_loading(true);
         }
         let weak = Rc::downgrade(self);
         nyx_core::cmd::background(
@@ -262,7 +262,7 @@ impl Ui {
                                 }
                             });
                             if same && ui.workflow.message() == message {
-                                ui.workflow.message.buffer().set_text("");
+                                ui.workflow.set_message("");
                                 ui.workflow.amend.set_active(false);
                             }
                         }

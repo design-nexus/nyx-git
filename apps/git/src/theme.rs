@@ -18,4 +18,21 @@ pub fn install() {
             })
         }),
     });
+    install_icons();
+}
+
+/// Git's own symbolic icons (`git-*-symbolic`), written to the cache once and added to the
+/// icon search path.
+fn install_icons() {
+    let dir = nyx_core::paths::cache_dir().join("icons");
+    let _ = std::fs::create_dir_all(&dir);
+    for (name, svg) in crate::ui::icons::ICONS {
+        let path = dir.join(name);
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(*svg) {
+            let _ = std::fs::write(&path, svg);
+        }
+    }
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::IconTheme::for_display(&display).add_search_path(&dir);
+    }
 }

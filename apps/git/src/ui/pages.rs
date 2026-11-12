@@ -63,7 +63,7 @@ impl Pages {
 pub fn is_studio(name: &str) -> bool {
     matches!(name, "rebase" | "conflicts")
 }
-/// History and Changes share the window's details pane; the other pages lay out their own.
+/// History uses the window's details pane; the other pages lay out their own.
 pub fn has_details(name: &str) -> bool {
-    matches!(name, "history" | "changes")
+    name == "history"
 }

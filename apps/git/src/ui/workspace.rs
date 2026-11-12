@@ -7,29 +7,6 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
 };
-pub fn tab_strip() -> (gtk::Box, gtk::Box) {
-    let bar = widgets::hbox(4);
-    bar.add_css_class("git-tabs");
-    let tabs = widgets::hbox(2);
-    tabs.add_css_class("tabs");
-    let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(super::scrollbars::policy())
-        .vscrollbar_policy(gtk::PolicyType::Never)
-        .hexpand(true)
-        .child(&tabs)
-        .build();
-    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-    let s = scroll.clone();
-    wheel.connect_scroll(move |_, _, dy| {
-        let a = s.hadjustment();
-        a.set_value(a.value() + dy * 40.);
-        glib::Propagation::Stop
-    });
-    scroll.add_controller(wheel);
-    bar.append(&scroll);
-    bar.append(&super::menu_button("list-add-symbolic", None, "Open, clone or find a repository", super::window::add_menu));
-    (bar, tabs)
-}
 impl Ui {
     pub fn rebuild_tabs(&self) {
         let workspace = prefs::get().workspace;
@@ -37,48 +14,19 @@ impl Ui {
         if !self.tabs_changed(&workspace.open, active.as_ref()) {
             return;
         }
-        while let Some(child) = self.tabs.first_child() {
-            self.tabs.remove(&child);
-        }
-        for root in workspace.open {
-            let tab = widgets::hbox(0);
-            tab.add_css_class("doc-tab");
-            if active.as_ref() == Some(&root) {
-                tab.add_css_class("active");
-            }
-            let main = gtk::Button::new();
-            main.add_css_class("tab-main");
-            let name = widgets::label(&root.file_name().unwrap_or_default().to_string_lossy(), "tab-name");
-            name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-            name.set_max_width_chars(20);
-            main.set_child(Some(&name));
-            main.set_tooltip_text(Some(&root.to_string_lossy()));
-            let r = root.clone();
-            main.connect_clicked(move |_| {
-                if let Some(ui) = current() {
-                    ui.open(r.clone());
-                }
-            });
-            tab.append(&main);
-            let close = gtk::Button::from_icon_name("window-close-symbolic");
-            close.add_css_class("tab-close");
-            close.set_tooltip_text(Some("Close repository tab (Ctrl+W) · commit draft is retained"));
-            let r = root.clone();
-            close.connect_clicked(move |_| {
-                if let Some(ui) = current() {
-                    ui.close_repository(&r);
-                }
-            });
-            tab.append(&close);
-            let middle = gtk::GestureClick::builder().button(2).build();
-            middle.connect_released(move |_, _, _, _| {
-                if let Some(ui) = current() {
-                    ui.close_repository(&root);
-                }
-            });
-            tab.add_controller(middle);
-            self.tabs.append(&tab);
-        }
+        let tabs: Vec<nyx_ui::tabs::Tab> = workspace
+            .open
+            .iter()
+            .map(|root| nyx_ui::tabs::Tab {
+                title: root.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                icon: Some("git-folder-symbolic".into()),
+                tooltip: Some(format!("{}\nCtrl+W closes it; its commit draft is kept", nyx_core::paths::pretty(root))),
+                dirty: false,
+            })
+            .collect();
+        let index = active.as_ref().and_then(|a| workspace.open.iter().position(|r| r == a)).unwrap_or(0);
+        self.tabs.root.set_visible(tabs.len() > 1);
+        self.tabs.set_tabs(&tabs, index);
     }
     pub fn save_repository(&self) {
         if self.restoring.get() {
@@ -92,12 +40,14 @@ impl Ui {
         let zoom = self.graph.zoom();
         let message = self.workflow.message();
         let amend = self.workflow.amend.is_active();
+        // The divider means something only on a page with the details pane.
+        let shown = self.detail_scroll.is_visible();
         prefs::update(|p| {
             let entry = p.workspace.entry(&root);
-            if narrow {
-                entry.narrow_position = position;
-            } else {
-                entry.details_position = position;
+            match (shown, narrow) {
+                (true, true) => entry.narrow_position = position,
+                (true, false) => entry.details_position = position,
+                _ => {}
             }
             entry.view = view;
             entry.zoom = zoom;
@@ -120,11 +70,10 @@ impl Ui {
         self.search.set_text("");
         self.graph.search.set_text("");
         self.workflow.category.set_selected(0);
-        self.workflow.message.buffer().set_text(&state.message);
+        self.workflow.set_message(&state.message);
         self.workflow.amend.set_active(state.amend);
         self.split.set_position(
-            if self.split.orientation() == gtk::Orientation::Vertical { state.narrow_position } else { state.details_position }
-                .max(100),
+            if self.split.orientation() == gtk::Orientation::Vertical { state.narrow_position.max(200) } else { state.details_position.max(100) },
         );
         self.show_view(&state.view);
         self.graph.restore_zoom(state.zoom);
@@ -155,17 +104,18 @@ impl Ui {
                 self.graph.close();
                 self.sidebar.clear();
                 self.monitor.clear();
-                self.workflow.select(None);
-                self.workflow.message.buffer().set_text("");
+                self.workflow.select(None, false);
+                self.workflow.set_message("");
                 self.workflow.amend.set_active(false);
                 self.workflow.diff.set_text("");
                 self.workflow.sensitive(false);
                 self.workflow.operation_status(None, false);
                 self.files.remove_all();
                 self.pages.set_visible_child_name("empty");
+                self.show_starts(true);
                 self.empty.set_text("Open a repository to view working changes.");
-                self.summary.set_text("Open a repository");
-                self.details.set_text("Select a changed file to inspect its status.");
+                self.header.show_repository(None, "");
+                self.header.show_branch(None, None, "");
                 nyx_ui::chrome::set_title(&self.window, "Git", "");
                 self.restoring.set(false);
                 self.update_readout();

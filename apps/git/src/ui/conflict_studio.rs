@@ -42,7 +42,7 @@ fn text_of(side: &Option<conflicts::Side>) -> String {
 }
 fn pane(title: &str, view: &DiffView) -> gtk::Box {
     let b = widgets::vbox(4);
-    b.append(&widgets::label(title, "group-title"));
+    b.append(&widgets::label(title, "git-insp-group"));
     b.append(&view.root);
     view.root.set_min_content_height(120);
     b
@@ -52,27 +52,25 @@ impl ConflictStudio {
         let root = widgets::vbox(0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        let bar = widgets::hbox(6);
-        bar.add_css_class("git-history-search");
-        let back = gtk::Button::with_label("Back to Changes");
-        back.connect_clicked(|_| {
+        let bar = super::pagebar::PageBar::new();
+        let back = super::pagebar::action("git-chev-l-symbolic", "Changes", "Back to Changes", || {
             if let Some(ui) = current() {
                 ui.show_view("changes");
             }
         });
-        bar.append(&back);
-        let title = widgets::label("Conflict Studio", "section-title");
-        title.set_hexpand(true);
+        bar.start(&back);
+        let title = widgets::label("Conflict Studio", "git-bar-title");
         title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        bar.append(&title);
-        let remaining = widgets::label("", "dim-label");
-        bar.append(&remaining);
-        let layout = gtk::ToggleButton::with_label("Focused");
-        layout.add_css_class("flat");
+        bar.start(&title);
+        let remaining = widgets::label("", "git-bar-note");
+        bar.end(&remaining);
+        let layout = gtk::ToggleButton::with_label("Result only");
+        layout.add_css_class("git-bar-action");
+        layout.add_css_class("git-toggle");
         layout.set_tooltip_text(Some("Show only the result, or Base, Ours and Theirs above it"));
         layout.connect_toggled(|b| studio(|s| s.set_focused(b.is_active())));
-        bar.append(&layout);
-        root.append(&bar);
+        bar.end(&layout);
+        root.append(&bar.root);
         let files = gtk::ListBox::new();
         files.add_css_class("git-palette");
         files.update_property(&[gtk::accessible::Property::Label("Conflicted files")]);
@@ -98,18 +96,23 @@ impl ConflictStudio {
         three.append(&pane("THEIRS · stage 3", &theirs));
         let result_box = widgets::vbox(6);
         let tools = widgets::hbox(6);
-        tools.append(&widgets::label("RESULT", "group-title"));
+        tools.add_css_class("git-diffbar");
+        tools.append(&widgets::label("RESULT", "git-insp-group"));
         let spacer = widgets::hbox(0);
         spacer.set_hexpand(true);
         tools.append(&spacer);
-        for (label, tip, step) in [("↑", "Previous conflict (Alt+Up)", -1), ("↓", "Next conflict (Alt+Down)", 1)] {
-            let b = gtk::Button::with_label(label);
-            b.set_tooltip_text(Some(tip));
+        for (icon, tip, step) in [("git-chev-u-symbolic", "Previous conflict (Alt+Up)", -1), ("git-chev-d-symbolic", "Next conflict (Alt+Down)", 1)] {
+            let b = widgets::bar_button(icon, tip);
             b.connect_clicked(move |_| studio(|s| s.jump(step)));
             tools.append(&b);
         }
+        // One choice per conflict: a segmented row, as a single control.
+        let choices = widgets::hbox(0);
+        choices.add_css_class("segmented");
+        choices.add_css_class("git-segments");
         for (label, choice) in [("Ours", Choice::Ours), ("Theirs", Choice::Theirs), ("Both", Choice::Both), ("Base", Choice::Base)] {
             let b = gtk::Button::with_label(label);
+            b.add_css_class("segment");
             b.set_tooltip_text(Some(match choice {
                 Choice::Ours => "Take our side of the conflict at the cursor",
                 Choice::Theirs => "Take their side of the conflict at the cursor",
@@ -117,13 +120,17 @@ impl ConflictStudio {
                 Choice::Base => "Go back to the common base for the conflict at the cursor (diff3 markers only)",
             }));
             b.connect_clicked(move |_| studio(|s| s.choose(choice)));
-            tools.append(&b);
+            choices.append(&b);
         }
+        tools.append(&choices);
         result_box.append(&tools);
         result.root.set_min_content_height(200);
         result_box.append(&result.root);
         let actions = widgets::hbox(6);
         actions.set_halign(gtk::Align::End);
+        actions.set_margin_top(8);
+        actions.set_margin_end(16);
+        actions.set_margin_bottom(12);
         let reset = gtk::Button::with_label("Start over");
         reset.set_tooltip_text(Some("Put the working file's contents back in the result"));
         reset.connect_clicked(|_| studio(|s| s.reload_result()));
@@ -145,7 +152,7 @@ impl ConflictStudio {
         sides.set_vexpand(true);
         super::layout::persist(&sides, "conflicts.sides", 220, false);
         let whole = widgets::vbox(10);
-        whole.add_css_class("git-details");
+        whole.add_css_class("git-insp");
         let stack = gtk::Stack::new();
         stack.add_named(&sides, Some("text"));
         stack.add_named(&whole, Some("whole"));

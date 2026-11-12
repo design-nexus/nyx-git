@@ -105,10 +105,9 @@ impl State {
 pub struct FlowPage {
     pub root: gtk::Box,
     inner: gtk::Paned,
-    legend: gtk::Label,
     canvas: gtk::DrawingArea,
     list: gtk::ListBox,
-    inspector: gtk::Box,
+    inspector: super::inspector::Inspector,
     readout: gtk::Label,
     inactive: gtk::ToggleButton,
     state: Rc<RefCell<State>>,
@@ -166,6 +165,60 @@ fn text(area: &gtk::DrawingArea, cr: &cairo::Context, value: &str, at: (f64, f64
     cr.move_to(x, y);
     pangocairo::functions::show_layout(cr, &layout);
 }
+/// ?: what each kind of line on the canvas means, drawn as it's drawn there.
+fn legend() -> gtk::Popover {
+    let popover = gtk::Popover::new();
+    popover.add_css_class("git-legend");
+    let grid = gtk::Grid::new();
+    grid.set_row_spacing(8);
+    grid.set_column_spacing(12);
+    let rows: [(&str, &[f64], &str, f64); 4] = [
+        ("dim", &[], "Git ancestry: started from the branch to its left", 2.0),
+        ("accent", &[6.0, 5.0], "A pull or merge request into a branch", 2.0),
+        ("warning", &[1.5, 5.0], "Shared files: worked out, not a Git relationship", 2.0),
+        ("accent", &[3.0, 4.0], "An action, shown before you take it", 2.5),
+    ];
+    for (i, (tone, dash, words, width)) in rows.into_iter().enumerate() {
+        let sample = gtk::DrawingArea::new();
+        sample.set_content_width(34);
+        sample.set_content_height(10);
+        let dash = dash.to_vec();
+        sample.set_draw_func(move |_, cr, w, h| {
+            let palette = nyx_theme::palette();
+            let tokens = nyx_theme::tokens();
+            let c = match tone {
+                "accent" => rgba(&palette.accent),
+                "warning" => rgba(tokens.color("status.warning")),
+                _ => rgba(&palette.dim_text),
+            };
+            set(cr, &c, if tone == "dim" { 0.7 } else { 1.0 });
+            cr.set_line_width(width);
+            cr.set_line_cap(cairo::LineCap::Round);
+            cr.set_dash(&dash, 0.0);
+            cr.move_to(2.0, h as f64 / 2.0);
+            cr.line_to(w as f64 - 2.0, h as f64 / 2.0);
+            let _ = cr.stroke();
+        });
+        sample.set_valign(gtk::Align::Center);
+        grid.attach(&sample, 0, i as i32, 1, 1);
+        grid.attach(&widgets::label(words, ""), 1, i as i32, 1, 1);
+    }
+    let body = widgets::vbox(10);
+    body.set_margin_top(6);
+    body.set_margin_bottom(6);
+    body.set_margin_start(6);
+    body.set_margin_end(6);
+    body.append(&grid);
+    let note = widgets::label(
+        "A card's lower strip is the worktree it's checked out in. Chips are Nyx Agents sessions working there. Nearness on the canvas means nothing.",
+        "git-insp-note",
+    );
+    note.set_wrap(true);
+    note.set_max_width_chars(44);
+    body.append(&note);
+    popover.set_child(Some(&body));
+    popover
+}
 fn divergence(b: &Branch, trunk: &str) -> String {
     if b.trunk {
         return "trunk".into();
@@ -182,53 +235,59 @@ impl FlowPage {
         let root = widgets::vbox(0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        let toolbar = widgets::hbox(6);
-        toolbar.add_css_class("git-history-search");
+        let toolbar = super::pagebar::PageBar::new();
         let search = gtk::SearchEntry::new();
-        search.set_placeholder_text(Some("Find a branch or worktree"));
-        search.set_width_chars(18);
-        toolbar.append(&search);
-        let inactive = gtk::ToggleButton::with_label("Inactive");
-        inactive.add_css_class("flat");
-        inactive.set_tooltip_text(Some("Also show merged branches and branches untouched for 30 days"));
-        toolbar.append(&inactive);
-        let legend = widgets::label("— ancestry  ┄ request  ··· shared files (derived)  ⇢ considered", "dim-label");
-        legend.add_css_class("git-palette-detail");
-        legend.set_hexpand(true);
-        legend.set_ellipsize(pango::EllipsizeMode::End);
-        legend.set_tooltip_text(Some(
-            "Solid lines are Git ancestry: a branch started from the one to its left. A card's lower strip is the worktree it's checked out in. Chips are Nyx Agents sessions working there. Dashed lines are pull or merge requests. Dotted amber lines are derived: two lines of work changed the same files. A dotted accent arrow shows an action before you take it. Nearness on the canvas means nothing.",
-        ));
-        toolbar.append(&legend);
+        toolbar.start(&super::pagebar::search(&search, "Find a branch or worktree", "", 16));
+        let inactive = gtk::ToggleButton::new();
+        let shown = super::pagebar::toggle_segments(&inactive, "Active", "All");
+        shown.set_tooltip_text(Some("All also shows merged branches and branches untouched for 30 days"));
+        toolbar.start(&shown);
+        let new = super::pagebar::action("git-plus-symbolic", "New", "A branch or a worktree from here", || {});
+        if let Some(row) = new.child().and_downcast::<gtk::Box>() {
+            row.append(&gtk::Image::from_icon_name("git-chev-d-symbolic"));
+        }
+        new.connect_clicked(|b| {
+            nyx_ui::menu::popup_below(
+                b,
+                vec![
+                    nyx_ui::menu::item("New branch from HEAD…", || super::advanced::target_action("branch", "HEAD".into()))
+                        .icon("git-branch-symbolic"),
+                    nyx_ui::menu::item("New worktree…", || {
+                        if let Some(root) = current().and_then(|ui| ui.root()) {
+                            super::worktree_manager::create_for(root, None, None);
+                        }
+                    })
+                    .icon("git-worktree-symbolic"),
+                ],
+            )
+        });
+        new.add_css_class("git-bordered");
+        toolbar.end(&new);
         let show_list = gtk::ToggleButton::new();
-        show_list.set_icon_name("view-list-symbolic");
-        show_list.add_css_class("flat");
+        show_list.set_icon_name("git-list-symbolic");
+        show_list.add_css_class("bar-button");
         show_list.set_tooltip_text(Some("List the cards beside the canvas"));
         show_list.set_active(crate::prefs::get().flow_list);
-        toolbar.append(&show_list);
-        let new_branch = widgets::bar_button("list-add-symbolic", "New branch from HEAD…");
-        new_branch.connect_clicked(|_| super::advanced::target_action("branch", "HEAD".into()));
-        toolbar.append(&new_branch);
-        let new_worktree = widgets::bar_button("folder-new-symbolic", "New worktree…");
-        new_worktree.connect_clicked(|_| {
-            if let Some(root) = current().and_then(|ui| ui.root()) {
-                super::worktree_manager::create_for(root, None, None);
-            }
-        });
-        toolbar.append(&new_worktree);
-        let auto = widgets::bar_button("view-grid-symbolic", "Auto layout: put moved cards back");
+        toolbar.end(&show_list);
+        let auto = widgets::bar_button("git-layers-symbolic", "Auto layout: put moved cards back");
         auto.connect_clicked(|_| page(|p| p.auto_layout()));
-        toolbar.append(&auto);
-        let fit = widgets::bar_button("zoom-fit-best-symbolic", "Fit everything (0)");
+        toolbar.end(&auto);
+        let fit = widgets::bar_button("git-fit-symbolic", "Fit everything (0)");
         fit.connect_clicked(|_| page(|p| {
             p.moved.set(false);
             p.fit();
         }));
-        toolbar.append(&fit);
-        let refresh = widgets::bar_button("view-refresh-symbolic", "Read the work in progress again");
+        toolbar.end(&fit);
+        let refresh = widgets::bar_button("git-refresh-symbolic", "Read the work in progress again");
         refresh.connect_clicked(|_| page(|p| p.load(true)));
-        toolbar.append(&refresh);
-        root.append(&toolbar);
+        toolbar.end(&refresh);
+        let help = gtk::MenuButton::new();
+        help.set_icon_name("git-help-symbolic");
+        help.add_css_class("bar-button");
+        help.set_tooltip_text(Some("What the lines mean"));
+        help.set_popover(Some(&legend()));
+        toolbar.end(&help);
+        root.append(&toolbar.root);
 
         let list = gtk::ListBox::new();
         list.add_css_class("git-palette");
@@ -250,13 +309,12 @@ impl FlowPage {
             gtk::accessible::Property::Label("Flow canvas"),
             gtk::accessible::Property::Description("Arrow keys move between cards, Enter opens, Shift+F10 shows actions, plus and minus zoom, 0 fits."),
         ]);
-        let inspector = widgets::vbox(8);
-        inspector.add_css_class("git-details");
+        let inspector = super::inspector::Inspector::new();
         let inspector_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(super::scrollbars::policy())
             .min_content_width(260)
-            .child(&inspector)
+            .child(&inspector.root)
             .build();
         let inner = gtk::Paned::new(gtk::Orientation::Horizontal);
         inner.set_start_child(Some(&canvas));
@@ -285,7 +343,6 @@ impl FlowPage {
         let me = Rc::new(Self {
             root,
             inner,
-            legend,
             canvas,
             list,
             inspector,
@@ -469,7 +526,6 @@ impl FlowPage {
         if self.inner.orientation() != o {
             self.inner.set_orientation(o);
         }
-        self.legend.set_visible(!narrow);
     }
     /// Read the flow again when Nyx Agents' sessions change.
     fn watch_agents(&self) {
@@ -733,105 +789,101 @@ impl FlowPage {
         }
     }
     fn inspect(&self) {
-        while let Some(c) = self.inspector.first_child() {
-            self.inspector.remove(&c);
-        }
-        let add = |text: &str, class: &str| {
-            let l = widgets::label(text, class);
-            l.set_wrap(true);
-            l.set_wrap_mode(pango::WrapMode::WordChar);
-            l.set_selectable(true);
-            self.inspector.append(&l);
-            l
-        };
+        let insp = &self.inspector;
+        insp.clear();
         let s = self.state.borrow();
         let Some(id) = s.selected.clone() else {
-            add("Select a card to see what Git knows about it and what can be done.", "dim-label");
+            insp.note("Select a card to see what Git knows about it and what can be done.");
             return;
         };
         let Some(f) = s.flow.as_ref() else { return };
         let trunk = f.trunk.clone().unwrap_or_else(|| "trunk".into());
-        add(&s.title(&id), "section-title");
+        let is_branch = s.branch(&id).is_some();
+        insp.title(Some(if is_branch { "git-branch-symbolic" } else { "git-worktree-symbolic" }), &s.title(&id));
         if let Some(b) = s.branch(&id) {
-            add(
-                &match (b.trunk, b.parent.as_deref()) {
-                    (true, _) => "Trunk: the branch other work starts from".to_string(),
-                    (false, Some(p)) if p != trunk => format!("Builds on {p}"),
-                    _ => "Branch".to_string(),
-                },
-                "dim-label",
-            );
-            add("GIT", "group-title");
-            add(&format!("{} {} · {}", &b.tip[..b.tip.len().min(10)], b.subject, super::graph_renderer::relative_time(b.time)), "");
-            add(&divergence(b, &trunk), "");
+            insp.sub(&match (b.trunk, b.parent.as_deref()) {
+                (true, _) => "The trunk: the branch other work starts from".to_string(),
+                (false, Some(p)) => format!("Builds on {p}"),
+                _ => format!("Builds on {trunk}"),
+            });
+            insp.group("Git");
+            insp.kv("Last commit", &format!("{} · {}", &b.tip[..b.tip.len().min(7)], super::graph_renderer::ago(b.time)), "");
+            insp.kv("Subject", &b.subject, "");
+            if !b.trunk {
+                insp.kv("Ahead", &divergence(b, &trunk), "");
+            }
             if let Some(fork) = &b.fork {
-                add(&format!("Shares history with {} up to {}", b.parent.as_deref().unwrap_or(&trunk), &fork[..fork.len().min(10)]), "dim-label");
+                insp.kv("Forked at", &fork[..fork.len().min(7)], "");
             }
             match (&b.upstream, b.tracking) {
-                (Some(up), Some((0, 0))) => add(&format!("Up to date with {up}"), "dim-label"),
-                (Some(up), Some((a, behind))) => add(&format!("{up}: ↑{a} to push, ↓{behind} to pull"), "dim-label"),
-                _ => add("Not published: no upstream branch", "dim-label"),
+                (Some(up), Some((0, 0))) => insp.kv("Upstream", &format!("{up} · up to date"), "ok"),
+                (Some(up), Some((a, behind))) => insp.kv("Upstream", &format!("{up} · ↑{a} to push, ↓{behind} to pull"), "acc"),
+                _ => insp.kv("Upstream", "Not published", "warn"),
             };
             for link in s.links.iter().filter(|l| l.source == b.name) {
-                add("REVIEW", "group-title");
-                add(&format!("#{} {} → {}", link.number, link.title, link.target), "");
-                add(&link.state, "dim-label");
+                insp.group("Review");
+                insp.kv("Request", &format!("#{} {} → {}", link.number, link.title, link.target), "acc");
+                insp.kv("State", &link.state, "");
             }
         }
         if let Some(w) = s.worktree(&id) {
-            add("WORKTREE", "group-title");
-            add(&w.path.display().to_string(), "");
-            add(
-                &format!(
-                    "{}{}{}{}",
-                    match w.dirty {
-                        Some(0) => "Clean".to_string(),
-                        Some(n) => format!("{n} changed file{}", if n == 1 { "" } else { "s" }),
-                        None => "Changes unknown".into(),
-                    },
-                    if w.open { " · open in this window" } else { "" },
-                    if w.main { " · main worktree" } else { "" },
-                    if w.locked { " · locked" } else { "" }
-                ),
-                "dim-label",
-            );
+            insp.group("Worktree");
+            insp.kv("Folder", &nyx_core::paths::pretty(&w.path), "");
+            let (changes, tone) = match w.dirty {
+                Some(0) => ("Clean".to_string(), "ok"),
+                Some(n) => (format!("{n} changed file{}", if n == 1 { "" } else { "s" }), "warn"),
+                None => ("Unknown".into(), ""),
+            };
+            insp.kv("Changes", &changes, tone);
+            let mut notes = Vec::new();
+            if w.open {
+                notes.push("open in this window");
+            }
+            if w.main {
+                notes.push("the main worktree");
+            }
+            if w.locked {
+                notes.push("locked");
+            }
+            if !notes.is_empty() {
+                insp.kv("", &notes.join(" · "), "");
+            }
         }
         let sessions = s.agents(&id);
         if !sessions.is_empty() {
-            add("AGENTS", "group-title");
+            insp.group("Agents");
             for a in sessions {
-                add(&format!("{} · {}", a.agent(), a.state()), "");
-                add(&a.title, "dim-label");
-                let open = super::wrapping_button("Open in Nyx Agents");
-                let session = a.clone();
-                open.connect_clicked(move |_| {
-                    if let Err(e) = agents::open(&session)
-                        && let Some(ui) = current()
-                    {
-                        ui.error(&format!("Could not open the session: {e:#}"));
-                    }
-                });
-                self.inspector.append(&open);
+                insp.kv(&a.agent(), &a.state(), if a.activity == "blocked" { "warn" } else { "ok" });
+                if !a.title.is_empty() {
+                    insp.note(&a.title);
+                }
             }
         }
         if let Some(name) = id.strip_prefix("branch:") {
             let shared: Vec<_> = f.overlaps.iter().filter(|o| o.a == name || o.b == name).collect();
             if !shared.is_empty() {
-                add("SHARED FILES", "group-title");
-                add("Derived from what each changed since it forked, plus uncommitted changes. Not a Git relationship.", "dim-label");
+                insp.group("Shared files");
                 for o in shared {
                     let other = if o.a == name { &o.b } else { &o.a };
                     let files: Vec<_> = o.files.iter().take(5).map(|f| f.display().to_string()).collect();
-                    add(&format!("{other}: {}{}", files.join(", "), if o.files.len() > 5 { format!(" +{}", o.files.len() - 5) } else { String::new() }), "git-warning");
+                    let more = if o.files.len() > 5 { format!(" and {} more", o.files.len() - 5) } else { String::new() };
+                    insp.kv(other, &format!("{}{more}", files.join(", ")), "warn");
                 }
+                insp.note("Worked out from what each changed since it forked, plus uncommitted changes. Not a Git relationship.");
             }
         }
-        add("ACTIONS", "group-title");
-        let box_ = widgets::vbox(6);
+        insp.group("Actions");
+        let column = insp.actions();
         drop(s);
-        for (label, run) in actions(&id) {
-            let b = super::wrapping_button(&label);
-            b.set_halign(gtk::Align::Fill);
+        for (i, (label, run)) in actions(&id).into_iter().enumerate() {
+            let style = if super::inspector::is_danger(&label) {
+                super::inspector::Style::Danger
+            } else if i == 0 {
+                super::inspector::Style::Primary
+            } else {
+                super::inspector::Style::Plain
+            };
+            let b = super::inspector::action(super::inspector::icon_for(&label), &label, style);
             let run2 = run.clone();
             b.connect_clicked(move |_| run2());
             // Show what Merge and Rebase would connect before they're chosen.
@@ -848,9 +900,8 @@ impl FlowPage {
                 }));
                 b.add_controller(motion);
             }
-            box_.append(&b);
+            column.append(&b);
         }
-        self.inspector.append(&box_);
     }
     /// Select a branch's card, for other pages that point at it.
     pub fn focus_branch(&self, name: &str) {

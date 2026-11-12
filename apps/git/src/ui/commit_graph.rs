@@ -93,10 +93,10 @@ impl CommitGraph {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        toolbar.add_css_class("git-history-search");
+        let toolbar = super::pagebar::PageBar::new();
         let scope_picker = gtk::DropDown::from_strings(&["All branches", "Current branch"]);
         super::compact_dropdown(&scope_picker);
+        super::narrow_dropdown(&scope_picker, 14);
         scope_picker.set_expression(Some(gtk::PropertyExpression::new(
             gtk::StringObject::static_type(),
             None::<gtk::Expression>,
@@ -106,22 +106,27 @@ impl CommitGraph {
         scope_picker.set_search_match_mode(gtk::StringFilterMatchMode::Substring);
         scope_picker.set_tooltip_text(Some("Show the history of all branches, the current branch, or one branch or tag"));
         scope_picker.update_property(&[gtk::accessible::Property::Label("Commit ancestry scope")]);
-        toolbar.append(&scope_picker);
+        scope_picker.add_css_class("git-dropdown");
+        toolbar.start(&scope_picker);
         let search = gtk::SearchEntry::new();
-        search.set_hexpand(true);
         search.update_property(&[gtk::accessible::Property::Label("Search commits")]);
-        search.set_width_chars(12);
-        search.set_placeholder_text(Some("Search commits · author: · after:YYYY-MM-DD · before:"));
         search.set_tooltip_text(Some("Find messages, hashes, authors or refs. Use author:name after:2026-01-01 before:2026-12-31 to narrow matches. The complete graph stays visible."));
-        toolbar.append(&search);
-        toolbar.append(&action("go-up-symbolic", "Previous match (Shift+Enter)", || graph(|g| g.find(true))));
-        toolbar.append(&action("go-down-symbolic", "Next match (Enter)", || graph(|g| g.find(false))));
+        let field = super::pagebar::search(&search, "Search commits, authors, hashes", "Ctrl F", 14);
+        toolbar.start(&field);
+        let steps = widgets::hbox(0);
+        steps.append(&action("git-chev-u-symbolic", "Previous match (Shift+Enter)", || graph(|g| g.find(true))));
+        steps.append(&action("git-chev-d-symbolic", "Next match (Enter)", || graph(|g| g.find(false))));
+        toolbar.start(&steps);
         let stop = action("process-stop-symbolic", "Stop loading history or searching", || graph(|g| g.cancel()));
         stop.set_visible(false);
-        toolbar.append(&stop);
+        toolbar.start(&stop);
         let collapse = gtk::ToggleButton::new();
-        collapse.set_icon_name("view-conceal-symbolic");
-        collapse.add_css_class("flat");
+        let inside = widgets::hbox(6);
+        inside.append(&gtk::Image::from_icon_name("git-merge-symbolic"));
+        inside.append(&gtk::Label::new(Some("Collapse merges")));
+        collapse.set_child(Some(&inside));
+        collapse.add_css_class("git-bar-action");
+        collapse.add_css_class("git-toggle");
         collapse.set_tooltip_text(Some("Collapse merged branches: follow first parents only, so each merge stands for the branch it brought in"));
         collapse.set_active(prefs::get().first_parent);
         collapse.connect_toggled(|b| {
@@ -131,18 +136,18 @@ impl CommitGraph {
                 g.reset(true);
             });
         });
-        toolbar.append(&collapse);
         let timeline = gtk::ToggleButton::new();
-        timeline.set_icon_name("view-continuous-symbolic");
-        timeline.add_css_class("flat");
         timeline.set_tooltip_text(Some("Timeline: commits left to right, newest first, in their branch lanes"));
         timeline.set_active(prefs::get().timeline);
         timeline.connect_toggled(|b| {
             prefs::update(|p| p.timeline = b.is_active());
             graph(|g| g.set_timeline(b.is_active()));
         });
-        toolbar.append(&timeline);
-        root.append(&toolbar);
+        let modes = super::pagebar::toggle_segments(&timeline, "Graph", "Timeline");
+        modes.set_tooltip_text(Some("The commit graph, or the same commits along time in their branch lanes"));
+        toolbar.end(&modes);
+        toolbar.end(&collapse);
+        root.append(&toolbar.root);
         let canvas = gtk::DrawingArea::new();
         canvas.set_hexpand(true);
         canvas.set_vexpand(true);
@@ -227,6 +232,7 @@ impl CommitGraph {
             let state = state.borrow();
             let zoom = current().map_or(1.0, |ui| ui.graph.zoom.get());
             let timeline = current().is_some_and(|ui| ui.graph.timeline.get());
+            let branch = current().and_then(|ui| ui.snapshot.borrow().as_ref().map(|s| s.repository.branch.clone()));
             let draw = if timeline { graph_renderer::draw_timeline } else { graph_renderer::draw };
             draw(
                 area,
@@ -243,6 +249,7 @@ impl CommitGraph {
                     lanes: state.lanes.max(1),
                     query: &state.query,
                     comparison: state.comparison.as_deref(),
+                    branch: branch.as_deref(),
                 },
             );
         });
@@ -745,7 +752,7 @@ impl CommitGraph {
     pub fn focus(&self) -> bool {
         self.canvas.grab_focus()
     }
-    fn selected_menu(&self) {
+    pub(super) fn selected_menu(&self) {
         let Some(index) = self.state.borrow().selected else { return };
         let along = ((index as f64 + 0.5) * self.step() - self.adjustment.value()).clamp(0., self.extent());
         if self.timeline.get() {

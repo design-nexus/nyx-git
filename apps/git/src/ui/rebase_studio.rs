@@ -63,40 +63,33 @@ impl RebaseStudio {
         let root = widgets::vbox(0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        let bar = widgets::hbox(6);
-        bar.add_css_class("git-history-search");
-        let back = gtk::Button::with_label("Back to History");
-        back.connect_clicked(|_| {
+        let bar = super::pagebar::PageBar::new();
+        let back = super::pagebar::action("git-chev-l-symbolic", "History", "Back to History, leaving the plan", || {
             if let Some(ui) = current() {
                 ui.show_view("history");
             }
         });
-        bar.append(&back);
-        let title = widgets::label("Rebase Studio", "section-title");
-        title.set_hexpand(true);
+        bar.start(&back);
+        let title = widgets::label("Rebase Studio", "git-bar-title");
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        bar.append(&title);
-        let reset = gtk::Button::with_label("Reset plan");
-        reset.set_tooltip_text(Some("Back to every commit picked in its original order"));
-        reset.connect_clicked(|_| studio(|s| {
+        bar.start(&title);
+        let hint = widgets::label("Drag cards or Alt+↑ ↓ to reorder", "git-bar-note");
+        hint.set_tooltip_text(Some(
+            "Oldest first. Squash and fixup join the commit above; edit and split stop so you can change or divide a commit, then Continue.",
+        ));
+        bar.end(&hint);
+        let reset = super::pagebar::action("git-undo-symbolic", "Reset plan", "Back to every commit picked in its original order", || studio(|s| {
             if let Some(p) = s.state.borrow_mut().as_mut() {
                 p.steps = p.original.clone();
             }
             s.render();
         }));
-        bar.append(&reset);
+        bar.end(&reset);
         let start = gtk::Button::with_label("Review and start…");
         start.add_css_class("suggested-action");
         start.connect_clicked(|_| studio(|s| s.start()));
-        bar.append(&start);
-        root.append(&bar);
-        let note = widgets::label(
-            "Oldest first. Drag cards, or use Alt+Up and Alt+Down, to reorder. Squash and fixup join the commit above; edit and split stop so you can change or divide a commit, then Continue.",
-            "dim-label",
-        );
-        note.set_wrap(true);
-        note.add_css_class("git-details");
-        root.append(&note);
+        bar.end(&start);
+        root.append(&bar.root);
         let cards = gtk::ListBox::new();
         cards.add_css_class("git-rebase-cards");
         cards.set_selection_mode(gtk::SelectionMode::None);
@@ -107,8 +100,8 @@ impl RebaseStudio {
             .hexpand(true)
             .child(&cards)
             .build();
-        let preview = widgets::vbox(8);
-        preview.add_css_class("git-details");
+        let preview = widgets::vbox(4);
+        preview.add_css_class("git-insp");
         let preview_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(super::scrollbars::policy())
@@ -156,7 +149,7 @@ impl RebaseStudio {
         }
         let state = self.state.borrow();
         let Some(p) = state.as_ref() else { return };
-        self.title.set_text(&format!("Rebase Studio · {}: {} commits after {}", p.facts.branch, p.steps.len(), &p.base[..p.base.len().min(10)]));
+        self.title.set_text(&format!("Rebase {} onto {} · {} commits", p.facts.branch, &p.base[..p.base.len().min(7)], p.steps.len()));
         for (i, step) in p.steps.iter().enumerate() {
             let row = gtk::ListBoxRow::new();
             row.set_activatable(false);
@@ -166,10 +159,11 @@ impl RebaseStudio {
                 card.add_css_class("dropped");
             }
             let line = widgets::hbox(10);
-            let grip = gtk::Image::from_icon_name("list-drag-handle-symbolic");
+            let grip = gtk::Image::from_icon_name("git-grip-symbolic");
+            grip.add_css_class("git-grip");
             grip.set_tooltip_text(Some("Drag to reorder"));
             line.append(&grip);
-            let hash = widgets::label(&step.id[..10], "dim-label");
+            let hash = widgets::label(&step.id[..7], "git-hash");
             line.append(&hash);
             let subject = widgets::label(&step.subject, "");
             subject.set_hexpand(true);
@@ -179,10 +173,12 @@ impl RebaseStudio {
                 line.append(&widgets::tag("on remote", ""));
             }
             let files = p.facts.files.get(&step.id).map_or(0, Vec::len);
-            let count = widgets::label(&format!("{files} file{}", if files == 1 { "" } else { "s" }), "dim-label");
+            let count = widgets::label(&format!("{files} file{}", if files == 1 { "" } else { "s" }), "git-bar-note");
             line.append(&count);
             let picker = gtk::DropDown::from_strings(&ACTIONS.iter().map(|(_, l)| *l).collect::<Vec<_>>());
             super::compact_dropdown(&picker);
+            picker.add_css_class("git-pick");
+            picker.add_css_class(&format!("{:?}", step.action).to_lowercase());
             picker.set_selected(ACTIONS.iter().position(|(a, _)| *a == step.action).unwrap_or(0) as u32);
             picker.update_property(&[gtk::accessible::Property::Label(&format!("Action for {}", step.subject))]);
             picker.connect_selected_notify(move |d| {
@@ -190,7 +186,7 @@ impl RebaseStudio {
                 glib::idle_add_local_once(move || studio(|s| s.set_action(i, action)));
             });
             line.append(&picker);
-            for (icon, tip, delta) in [("go-up-symbolic", "Move up (Alt+Up)", -1i32), ("go-down-symbolic", "Move down (Alt+Down)", 1)] {
+            for (icon, tip, delta) in [("git-chev-u-symbolic", "Move up (Alt+Up)", -1i32), ("git-chev-d-symbolic", "Move down (Alt+Down)", 1)] {
                 let b = widgets::icon_button(icon, tip);
                 let to = i as i32 + delta;
                 b.set_sensitive(to >= 0 && (to as usize) < p.steps.len());
@@ -267,7 +263,8 @@ impl RebaseStudio {
             self.preview.append(&l);
         };
         let proposed = advanced::proposed(&p.steps);
-        add(&format!("PROPOSED HISTORY · {} COMMIT{}", proposed.len(), if proposed.len() == 1 { "" } else { "S" }), "group-title");
+        add("Proposed history", "git-insp-title");
+        add(&format!("Oldest first · {} commit{} from {}", proposed.len(), if proposed.len() == 1 { "" } else { "s" }, p.original.len()), "git-insp-sub");
         for c in &proposed {
             let folded = if c.ids.len() > 1 { format!(" (+{} folded in)", c.ids.len() - 1) } else { String::new() };
             let mark = match c.action {
@@ -280,12 +277,12 @@ impl RebaseStudio {
         }
         let dropped = p.steps.iter().filter(|s| s.action == Pick::Drop).count();
         if dropped > 0 {
-            add(&format!("{dropped} commit{} dropped", if dropped == 1 { "" } else { "s" }), "dim-label");
+            add(&format!("{dropped} commit{} dropped", if dropped == 1 { "" } else { "s" }), "git-insp-note");
         }
         let reordered = p.steps.iter().map(|s| &s.id).ne(p.original.iter().map(|s| &s.id));
         let changed = reordered || p.steps.iter().any(|s| s.action != Pick::Pick);
-        add("ORIGINAL", "group-title");
-        add(&format!("{} commits on {}, oldest {} … newest {}", p.original.len(), p.facts.branch, &p.original[0].id[..8], &p.original[p.original.len() - 1].id[..8]), "dim-label");
+        add("ORIGINAL", "git-insp-group");
+        add(&format!("{} commits on {}, oldest {} … newest {}", p.original.len(), p.facts.branch, &p.original[0].id[..8], &p.original[p.original.len() - 1].id[..8]), "git-insp-note");
         let published = p.steps.iter().filter(|s| p.facts.published.contains(&s.id)).count();
         if published > 0 {
             self.preview.append(&widgets::banner(
@@ -298,21 +295,21 @@ impl RebaseStudio {
         }
         let warnings = advanced::reorder_warnings(&p.original, &p.steps, &p.facts.files);
         if !warnings.is_empty() {
-            add("LIKELY CONFLICTS", "group-title");
+            add("LIKELY CONFLICTS", "git-insp-group");
             for w in &warnings {
                 add(w, "git-warning");
             }
-            add("A preview can't promise either way: Git may stop for you to resolve, or may not.", "dim-label");
+            add("A preview can't promise either way: Git may stop for you to resolve, or may not.", "git-insp-note");
         }
         if !p.facts.other_refs.is_empty() {
-            add("OTHER REFERENCES", "group-title");
+            add("OTHER REFERENCES", "git-insp-group");
             let names: Vec<_> = p.facts.other_refs.iter().map(|(n, _)| n.as_str()).collect();
-            add(&format!("{} point into this range and stay on the old commits.", names.join(", ")), "dim-label");
+            add(&format!("{} point into this range and stay on the old commits.", names.join(", ")), "git-insp-note");
         }
-        add("RECOVERY", "group-title");
-        add("Nyx Git saves a recovery point at the current tip first. Abort during the rebase returns the branch to where it was.", "dim-label");
+        add("RECOVERY", "git-insp-group");
+        add("Nyx Git saves a recovery point at the current tip first. Abort during the rebase returns the branch to where it was.", "git-insp-note");
         if !changed {
-            add("The plan matches the original history; there's nothing to rebase yet.", "dim-label");
+            add("The plan matches the original history; there's nothing to rebase yet.", "git-insp-note");
         }
     }
     fn start(&self) {

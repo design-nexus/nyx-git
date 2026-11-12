@@ -49,6 +49,8 @@ pub struct Item {
     pub name: String,
     pub detail: String,
     pub action: Action,
+    /// Commits ahead of and behind the upstream, for a branch that has one.
+    pub track: Option<(usize, usize)>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Group {
@@ -63,6 +65,13 @@ pub struct Inventory {
 fn git(root: &Path, label: &str, args: &[&str]) -> Result<Vec<u8>> {
     operations::invoke(root, label, args.iter().map(OsString::from).collect(), None, &[], false)
 }
+/// "ahead 2, behind 1" (`%(upstream:track,nobracket)`) as (2, 1); "gone" or nothing as (0, 0).
+fn track(text: &str) -> (usize, usize) {
+    let count = |word: &str| {
+        text.split(", ").find_map(|part| part.strip_prefix(word)).and_then(|n| n.trim().parse().ok()).unwrap_or(0)
+    };
+    (count("ahead "), count("behind "))
+}
 pub fn read(root: &Path) -> Result<Inventory> {
     let mut groups = Vec::new();
     for (kind, prefix) in [(Kind::Local, "refs/heads/"), (Kind::RemoteBranch, "refs/remotes/"), (Kind::Tag, "refs/tags/")] {
@@ -72,14 +81,14 @@ pub fn read(root: &Path) -> Result<Inventory> {
             &[
                 "for-each-ref",
                 &format!("--count={}", LIMIT + 1),
-                "--format=%(refname)%00%(symref)%00%(upstream:short)%00%(HEAD)%00%(objecttype)%00%(*objecttype)%00",
+                "--format=%(refname)%00%(symref)%00%(upstream:short)%00%(HEAD)%00%(objecttype)%00%(*objecttype)%00%(upstream:track,nobracket)%00",
                 prefix,
             ],
         )?;
         let fields = bytes.split(|b| *b == 0).collect::<Vec<_>>();
         let mut items = Vec::new();
         let mut limited = false;
-        for row in fields.as_chunks::<6>().0 {
+        for row in fields.as_chunks::<7>().0 {
             if !row[1].is_empty() {
                 continue;
             } // Skip symbolic origin/HEAD aliases.
@@ -102,6 +111,7 @@ pub fn read(root: &Path) -> Result<Inventory> {
                 name: name[prefix.len()..].into(),
                 detail,
                 action: Action::Reference { reference: name.into(), current: row[3] == b"*", commit },
+                track: (!upstream.is_empty()).then(|| track(&String::from_utf8_lossy(row[6]))),
             });
         }
         limited |= items.len() > LIMIT;
@@ -123,6 +133,7 @@ pub fn read(root: &Path) -> Result<Inventory> {
             name: String::from_utf8_lossy(fields[1]).into(),
             detail: String::from_utf8_lossy(fields[2]).chars().take(500).collect(),
             action: Action::Stash(id.into()),
+            track: None,
         });
     }
     let limited = items.len() > LIMIT;
@@ -147,6 +158,7 @@ pub fn read(root: &Path) -> Result<Inventory> {
                 if w.prunable.is_some() { "\nMissing / prunable" } else { "" }
             ),
             action: Action::Worktree(w.path),
+            track: None,
         })
         .collect();
     groups.push(Group { kind: Kind::Worktree, items, limited });
@@ -160,8 +172,20 @@ pub fn read(root: &Path) -> Result<Inventory> {
             name: name.into(),
             detail: "Manage this repository’s remotes".into(),
             action: Action::Remote(name.into()),
+            track: None,
         })
         .collect();
     groups.push(Group { kind: Kind::Remote, items, limited });
     Ok(Inventory { groups })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reads_upstream_tracking() {
+        assert_eq!(super::track("ahead 2, behind 1"), (2, 1));
+        assert_eq!(super::track("behind 3"), (0, 3));
+        assert_eq!(super::track("gone"), (0, 0));
+        assert_eq!(super::track(""), (0, 0));
+    }
 }

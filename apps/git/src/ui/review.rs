@@ -32,7 +32,7 @@ pub struct ReviewPage {
     pub root: gtk::Box,
     heading: gtk::Label,
     list: gtk::ListBox,
-    detail: gtk::Box,
+    detail: super::inspector::Inspector,
     stack: gtk::Stack,
     empty: gtk::Box,
     all: Rc<Cell<bool>>,
@@ -57,35 +57,35 @@ impl ReviewPage {
         let root = widgets::vbox(0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        let bar = widgets::hbox(6);
-        bar.add_css_class("git-history-search");
+        let bar = super::pagebar::PageBar::new();
         let all = Rc::new(Cell::new(false));
         let a = all.clone();
         let states = widgets::segmented(&widgets::opts(&[("open", "Open"), ("all", "All")]), "open", move |id| {
             a.set(id == "all");
             page(|p| p.load(true));
         });
-        bar.append(&states);
-        let heading = widgets::label("", "dim-label");
-        heading.set_hexpand(true);
+        states.add_css_class("git-segments");
+        bar.start(&states);
+        let heading = widgets::label("", "git-bar-note");
         heading.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        bar.append(&heading);
-        let create = gtk::Button::with_label("New request…");
-        create.connect_clicked(|_| page(|p| {
+        bar.end(&heading);
+        let create = super::pagebar::action("git-plus-symbolic", "New request…", "Open a pull or merge request from a branch", || page(|p| {
             if let Some(d) = p.data.borrow().as_ref() {
                 super::providers::new_request(d.account.clone(), d.repo.clone());
             }
         }));
-        bar.append(&create);
-        let accounts = widgets::bar_button("system-users-symbolic", "Hosting accounts…");
+        create.add_css_class("git-bordered");
+        bar.end(&create);
+        let accounts = widgets::bar_button("git-users-symbolic", "Hosting accounts…");
         accounts.connect_clicked(|_| super::providers::show());
-        bar.append(&accounts);
-        let refresh = widgets::bar_button("view-refresh-symbolic", "Read requests and checks again");
+        bar.end(&accounts);
+        let refresh = widgets::bar_button("git-refresh-symbolic", "Read requests and checks again");
         refresh.connect_clicked(|_| page(|p| p.load(true)));
-        bar.append(&refresh);
-        root.append(&bar);
+        bar.end(&refresh);
+        root.append(&bar.root);
         let list = gtk::ListBox::new();
         list.add_css_class("git-palette");
+        list.add_css_class("git-requests");
         list.update_property(&[gtk::accessible::Property::Label("Pull and merge requests")]);
         list.connect_row_selected(|_, row| {
             let Some(n) = row.and_then(|r| r.widget_name().parse::<u64>().ok()) else { return };
@@ -97,13 +97,13 @@ impl ReviewPage {
             .min_content_width(260)
             .child(&list)
             .build();
-        let detail = widgets::vbox(8);
-        detail.add_css_class("git-details");
+        let detail = super::inspector::Inspector::new();
+        detail.root.add_css_class("git-request");
         let detail_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(super::scrollbars::policy())
             .hexpand(true)
-            .child(&detail)
+            .child(&detail.root)
             .build();
         let body = gtk::Paned::new(gtk::Orientation::Horizontal);
         body.set_start_child(Some(&list_scroll));
@@ -112,7 +112,8 @@ impl ReviewPage {
         body.set_shrink_start_child(false);
         body.set_shrink_end_child(false);
         super::layout::persist(&body, "review.list", 340, false);
-        let empty = widgets::vbox(12);
+        let empty = widgets::vbox(8);
+        empty.add_css_class("empty-state");
         empty.set_valign(gtk::Align::Center);
         empty.set_halign(gtk::Align::Center);
         let stack = gtk::Stack::new();
@@ -138,14 +139,23 @@ impl ReviewPage {
         while let Some(c) = self.empty.first_child() {
             self.empty.remove(&c);
         }
-        self.empty.append(&widgets::label(title, "section-title"));
+        let icon = gtk::Image::from_icon_name("git-review-symbolic");
+        icon.set_pixel_size(40);
+        icon.add_css_class("dim");
+        self.empty.append(&icon);
+        let t = widgets::label(title, "empty-title");
+        t.set_xalign(0.5);
+        self.empty.append(&t);
         let l = widgets::label(text, "dim-label");
         l.set_wrap(true);
-        l.set_max_width_chars(60);
+        l.set_max_width_chars(56);
         l.set_justify(gtk::Justification::Center);
+        l.set_xalign(0.5);
         self.empty.append(&l);
         if connect {
-            let b = gtk::Button::with_label("Hosting accounts…");
+            let b = gtk::Button::with_label("Connect an account…");
+            b.add_css_class("suggested-action");
+            b.set_margin_top(8);
             b.set_halign(gtk::Align::Center);
             b.connect_clicked(|_| super::providers::show());
             self.empty.append(&b);
@@ -229,18 +239,38 @@ impl ReviewPage {
         for (r, state) in &data.requests {
             let row = gtk::ListBoxRow::new();
             row.set_widget_name(&r.number.to_string());
-            let b = widgets::vbox(2);
-            let t = widgets::label(&format!("#{} {}", r.number, r.title), "");
+            let line = widgets::hbox(10);
+            let n = widgets::label(&format!("#{}", r.number), "git-request-number");
+            n.set_valign(gtk::Align::Start);
+            line.append(&n);
+            let b = widgets::vbox(4);
+            b.set_hexpand(true);
+            let t = widgets::label(&r.title, "git-request-title");
             t.set_ellipsize(gtk::pango::EllipsizeMode::End);
             b.append(&t);
-            let d = widgets::label(
-                &format!("{} → {} · {}{} · {}", r.source_branch, r.target, r.state, if r.draft { " · draft" } else { "" }, badge(*state)),
-                if *state == Some(CheckState::Failure) { "git-error" } else { "dim-label" },
-            );
-            d.add_css_class("git-palette-detail");
-            d.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            b.append(&d);
-            row.set_child(Some(&b));
+            let route = widgets::hbox(6);
+            route.add_css_class("git-request-meta");
+            route.append(&gtk::Image::from_icon_name("git-branch-symbolic"));
+            let way = widgets::label(&format!("{} → {}", r.source_branch, r.target), "");
+            way.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            route.append(&way);
+            b.append(&route);
+            let chips = widgets::hbox(6);
+            chips.append(&pill(&badge(*state), match state {
+                Some(CheckState::Failure) => "bad",
+                Some(CheckState::Pending) => "warn",
+                Some(_) => "ok",
+                None => "",
+            }));
+            if r.draft {
+                chips.append(&pill("draft", ""));
+            }
+            if r.state != "open" && r.state != "opened" {
+                chips.append(&pill(&r.state, "acc"));
+            }
+            b.append(&chips);
+            line.append(&b);
+            row.set_child(Some(&line));
             self.list.append(&row);
         }
         let keep = self.selected.get().filter(|n| data.requests.iter().any(|(r, _)| r.number == *n));
@@ -319,50 +349,42 @@ impl ReviewPage {
         );
     }
     fn render(&self, r: &Request, details: Option<Details>) {
-        while let Some(c) = self.detail.first_child() {
-            self.detail.remove(&c);
-        }
-        let add = |text: &str, class: &str| {
-            let l = widgets::label(text, class);
-            l.set_wrap(true);
-            l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            l.set_selectable(true);
-            self.detail.append(&l);
-        };
+        let insp = &self.detail;
+        insp.clear();
         let Some((account, repo, _)) = self.request(r.number) else { return };
         let caps = account.kind.capabilities();
-        add(&format!("#{} {}", r.number, r.title), "section-title");
-        add(&format!("{} → {} · {}{} · {}", r.source_branch, r.target, r.state, if r.draft { " · draft" } else { "" }, r.status), "dim-label");
+        let open_state = r.state == "open" || r.state == "opened";
+        let top = widgets::hbox(8);
+        top.append(&widgets::label(&format!("#{}", r.number), "git-request-number"));
+        top.append(&pill(if r.draft { "Draft" } else { &r.state }, if open_state { "ok" } else { "acc" }));
+        let route = widgets::label(&format!("{} → {}", r.source_branch, r.target), "git-insp-note");
+        route.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        top.append(&route);
+        insp.append(&top);
+        let title = insp.title(None, &r.title);
+        title.add_css_class("git-request-heading");
+        if !r.status.is_empty() {
+            insp.sub(&r.status);
+        }
         // The local side: is the source branch here, and where is it?
         let local = current().and_then(|ui| ui.destinations.flow_branch(&r.source_branch));
-        match &local {
-            Some((tip, worktree)) => add(
-                &format!(
-                    "Local branch {}{} · {}",
-                    r.source_branch,
-                    worktree.as_ref().map(|w| format!(" in {}", w.display())).unwrap_or_default(),
-                    if *tip == r.head { "same commit as the request".to_string() } else { format!("at {}, the request is at {}", &tip[..tip.len().min(8)], &r.head[..r.head.len().min(8)]) }
-                ),
-                "",
-            ),
-            None => add("No local branch by this name.", "dim-label"),
+        let actions = widgets::hbox(6);
+        actions.add_css_class("git-request-actions");
+        if caps.merge && open_state && !r.head.is_empty() {
+            let merge = widgets::labeled_button("git-merge-symbolic", "Merge…");
+            merge.add_css_class("suggested-action");
+            let (a, rp, rq) = (account.clone(), repo.clone(), r.clone());
+            let failing = details.as_ref().and_then(|d| review::summary(&d.checks)) == Some(CheckState::Failure);
+            merge.connect_clicked(move |_| merge_dialog(a.clone(), rp.clone(), rq.clone(), failing));
+            actions.append(&merge);
         }
-        let actions = gtk::FlowBox::new();
-        actions.set_selection_mode(gtk::SelectionMode::None);
-        actions.set_max_children_per_line(4);
-        actions.set_column_spacing(6);
-        actions.set_row_spacing(6);
-        let open = gtk::Button::with_label("Open on the web");
-        let (a, url) = (account.clone(), r.web_url.clone());
-        open.connect_clicked(move |_| super::providers::link(&a, &url));
-        actions.insert(&open, -1);
         if local.is_none() && !r.head.is_empty() {
-            let checkout = gtk::Button::with_label("Check out for review…");
+            let checkout = widgets::labeled_button("git-download-symbolic", "Check out for review…");
             let (a, rp, rq) = (account.clone(), repo.clone(), r.clone());
             checkout.connect_clicked(move |_| super::providers::checkout_request(a.clone(), rp.clone(), rq.clone()));
-            actions.insert(&checkout, -1);
+            actions.append(&checkout);
         } else if local.is_some() {
-            let show = gtk::Button::with_label("Show in Flow");
+            let show = widgets::labeled_button("git-flow-symbolic", "Show in Flow");
             let branch = r.source_branch.clone();
             show.connect_clicked(move |_| {
                 if let Some(ui) = current() {
@@ -370,64 +392,117 @@ impl ReviewPage {
                     ui.destinations.flow.focus_branch(&branch);
                 }
             });
-            actions.insert(&show, -1);
+            actions.append(&show);
         }
-        let open_state = r.state == "open" || r.state == "opened";
-        if caps.merge && open_state && !r.head.is_empty() {
-            let merge = gtk::Button::with_label("Merge…");
-            let (a, rp, rq) = (account.clone(), repo.clone(), r.clone());
-            let failing = details.as_ref().and_then(|d| review::summary(&d.checks)) == Some(CheckState::Failure);
-            merge.connect_clicked(move |_| merge_dialog(a.clone(), rp.clone(), rq.clone(), failing));
-            actions.insert(&merge, -1);
+        let open = widgets::labeled_button("git-open-symbolic", &format!("Open on {}", account.kind.name()));
+        open.add_css_class("git-bar-action");
+        let (a, url) = (account.clone(), r.web_url.clone());
+        open.connect_clicked(move |_| super::providers::link(&a, &url));
+        actions.append(&open);
+        insp.append(&actions);
+        insp.group("Here");
+        match &local {
+            Some((tip, worktree)) => {
+                insp.kv("Local branch", &r.source_branch, "");
+                if let Some(w) = worktree {
+                    insp.kv("Worktree", &nyx_core::paths::pretty(w), "");
+                }
+                if *tip == r.head {
+                    insp.kv("Tip", "Same commit as the request", "ok");
+                } else {
+                    insp.kv("Tip", &format!("{} here, {} in the request", &tip[..tip.len().min(7)], &r.head[..r.head.len().min(7)]), "warn");
+                }
+            }
+            None => {
+                insp.kv("Local branch", "None by this name", "");
+            }
         }
-        self.detail.append(&actions);
         let Some(d) = details else {
-            add("Reading checks, reviews, commits and files…", "dim-label");
+            insp.note("Reading checks, reviews, commits and files…");
             return;
         };
-        add("CHECKS", "group-title");
+        insp.group(&format!("Checks  {}", d.checks.len()));
         if d.checks.is_empty() {
-            add("No checks reported for the head commit.", "dim-label");
+            insp.note("No checks reported for the head commit.");
         }
         let mut checks = d.checks.clone();
         checks.sort_by_key(|c| c.state);
         for c in &checks {
-            let class = match c.state {
-                CheckState::Failure => "git-error",
-                CheckState::Pending => "git-warning",
-                _ => "",
+            let tone = match c.state {
+                CheckState::Failure => "bad",
+                CheckState::Pending => "warn",
+                _ => "ok",
             };
-            add(&format!("{} · {}", c.name, c.state.word()), class);
+            insp.kv(&c.name, c.state.word(), tone);
         }
-        add("REVIEWS", "group-title");
+        insp.group("Reviews");
         if d.reviews.is_empty() {
-            add(if account.kind == nyx_git::providers::Kind::Gitlab { "No approvals yet. Discussions are on the web." } else { "No reviews yet." }, "dim-label");
+            insp.note(if account.kind == nyx_git::providers::Kind::Gitlab { "No approvals yet. Discussions are on the web." } else { "No reviews yet." });
         }
         for rv in &d.reviews {
-            add(&format!("{} · {}", rv.author, rv.state.to_lowercase().replace('_', " ")), "");
+            let state = rv.state.to_lowercase().replace('_', " ");
+            let tone = if state.contains("approv") { "ok" } else if state.contains("change") { "warn" } else { "" };
+            insp.kv(&rv.author, &state, tone);
             if !rv.body.is_empty() {
-                add(&rv.body, "dim-label");
+                insp.note(&rv.body);
             }
         }
-        add(&format!("COMMITS · {}", d.commits.len()), "group-title");
+        insp.group(&format!("Commits  {}", d.commits.len()));
         for c in d.commits.iter().take(50) {
-            add(&format!("{} {} · {}", &c.id[..c.id.len().min(8)], c.subject, c.author), "");
+            let row = widgets::hbox(10);
+            row.add_css_class("git-insp-kv");
+            row.append(&widgets::label(&c.id[..c.id.len().min(7)], "git-hash"));
+            let subject = widgets::label(&c.subject, "");
+            subject.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            subject.set_hexpand(true);
+            subject.set_tooltip_text(Some(&format!("{} · {}", c.subject, c.author)));
+            row.append(&subject);
+            insp.append(&row);
         }
-        add(&format!("FILES · {}", d.files.len()), "group-title");
+        insp.group(&format!("Files  {}", d.files.len()));
         for f in d.files.iter().take(200) {
-            let counts = match (f.additions, f.deletions) {
-                (Some(a), Some(r)) => format!(" +{a} −{r}"),
-                _ => String::new(),
+            let row = widgets::hbox(10);
+            row.add_css_class("git-file-row");
+            let code = match f.status.as_str() {
+                "added" | "new" => 'A',
+                "removed" | "deleted" => 'D',
+                "renamed" => 'R',
+                _ => 'M',
             };
-            add(&format!("{} · {}{counts}", f.path, f.status), "dim-label");
+            let chip = widgets::label(&code.to_string(), "git-chip");
+            chip.set_xalign(0.5);
+            chip.add_css_class(match code {
+                'A' => "added",
+                'D' => "deleted",
+                'R' => "renamed",
+                _ => "modified",
+            });
+            row.append(&chip);
+            let name = widgets::label(&f.path, "git-file-name");
+            name.set_ellipsize(gtk::pango::EllipsizeMode::Start);
+            name.set_hexpand(true);
+            row.append(&name);
+            if let (Some(a), Some(r)) = (f.additions, f.deletions) {
+                row.append(&widgets::label(&format!("+{a} −{r}"), "git-activity-time"));
+            }
+            insp.append(&row);
         }
         if !caps.line_counts {
-            add(&format!("{} doesn't report line counts here.", account.kind.name()), "dim-label");
+            insp.note(&format!("{} doesn't report line counts here.", account.kind.name()));
         }
         for e in &d.errors {
-            add(e, "git-error");
+            insp.text(e).add_css_class("bad");
         }
     }
+}
+/// A state word in a rounded pill; `tone` is "ok", "warn", "bad", "acc" or "".
+fn pill(text: &str, tone: &str) -> gtk::Label {
+    let l = widgets::label(text, "git-pill");
+    if !tone.is_empty() {
+        l.add_css_class(tone);
+    }
+    l.set_valign(gtk::Align::Center);
+    l
 }
 fn merge_dialog(account: Account, repo: Repository, request: Request, failing: bool) {
     let caps = account.kind.capabilities();

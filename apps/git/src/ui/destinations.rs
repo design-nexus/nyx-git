@@ -14,26 +14,26 @@ pub const ALL: &[Destination] = &[
     Destination {
         id: "flow",
         title: "Flow",
-        icon: "network-workgroup-symbolic",
+        icon: "git-flow-symbolic",
         description: "Branches, worktrees, reviews and agents in progress",
     },
     Destination {
         id: "changes",
         title: "Changes",
-        icon: "document-edit-symbolic",
+        icon: "git-changes-symbolic",
         description: "Stage working changes and commit them",
     },
-    Destination { id: "history", title: "History", icon: "document-open-recent-symbolic", description: "The commit graph" },
+    Destination { id: "history", title: "History", icon: "git-history-symbolic", description: "The commit graph" },
     Destination {
         id: "review",
         title: "Review",
-        icon: "object-select-symbolic",
+        icon: "git-review-symbolic",
         description: "Pull and merge requests with their checks",
     },
     Destination {
         id: "activity",
         title: "Activity",
-        icon: "preferences-system-time-symbolic",
+        icon: "git-activity-symbolic",
         description: "What happened in the repository, and what can be recovered",
     },
 ];
@@ -52,6 +52,8 @@ impl Switch {
         let root = widgets::hbox(0);
         root.add_css_class("segmented");
         root.add_css_class("view-switch");
+        // Equal segments: the switch is as wide on every page and in every state.
+        root.set_homogeneous(true);
         root.set_valign(gtk::Align::Center);
         let on_change = Rc::new(on_change);
         let mut first: Option<gtk::ToggleButton> = None;

@@ -1,8 +1,13 @@
 pub mod advanced;
 pub mod blame;
+pub mod changes;
 pub mod commit_details;
 pub mod destinations;
 pub mod dev;
+pub mod header;
+pub mod icons;
+pub mod inspector;
+pub mod pagebar;
 pub mod layout;
 pub mod pages;
 pub mod palette;
@@ -66,6 +71,28 @@ pub fn compact_dropdown(dropdown: &gtk::DropDown) {
     }
     dropdown.set_factory(Some(&factory(24, false)));
     dropdown.set_list_factory(Some(&factory(60, true)));
+}
+
+/// A dropdown whose closed button shows at most `chars` characters of its choice.
+pub fn narrow_dropdown(dropdown: &gtk::DropDown, chars: i32) {
+    use gtk::prelude::*;
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(move |_, item| {
+        let label = gtk::Label::new(None);
+        label.set_xalign(0.0);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_max_width_chars(chars);
+        item.downcast_ref::<gtk::ListItem>().unwrap().set_child(Some(&label));
+    });
+    factory.connect_bind(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let text = item.item().and_downcast::<gtk::StringObject>().map(|s| s.string()).unwrap_or_default();
+        if let Some(label) = item.child().and_downcast::<gtk::Label>() {
+            label.set_text(&text);
+            label.set_tooltip_text(Some(&text));
+        }
+    });
+    dropdown.set_factory(Some(&factory));
 }
 
 pub mod workspace;
@@ -167,18 +194,6 @@ pub fn open_url(url: &str) {
             ui.error(&format!("Could not open the page: {e}"));
         }
     });
-}
-
-/// A button whose label wraps, for narrow inspectors: its text never sets the pane's width.
-pub fn wrapping_button(text: &str) -> gtk::Button {
-    use gtk::prelude::*;
-    let b = gtk::Button::new();
-    let l = gtk::Label::new(Some(text));
-    l.set_wrap(true);
-    l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    l.set_justify(gtk::Justification::Center);
-    b.set_child(Some(&l));
-    b
 }
 
 /// Show the Conflict Studio, at `file` or the first conflicted file.
