@@ -188,7 +188,7 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some("Filter changed files"));
     search.add_css_class("bar-search");
-    search.set_width_chars(22);
+    search.set_width_chars(18);
     search.set_valign(gtk::Align::Center);
     let (tab_strip, tabs) = super::workspace::tab_strip();
     content.append(&tab_strip);
@@ -208,8 +208,9 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
         let row = widgets::hbox(4);
         let image = gtk::Image::from_icon_name(icon);
         row.append(&image);
+        // A fixed-width count, empty at zero, so the header never reflows.
         let count = widgets::label("", "sync-count");
-        count.set_visible(false);
+        count.set_width_chars(2);
         row.append(&count);
         b.set_child(Some(&row));
         b.set_tooltip_text(Some(tip));
@@ -395,6 +396,10 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     // The repository and branch, after the app's name.
     let summary = header.subtitle.clone();
     summary.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    // Fixed widths on both sides of the header keep the destinations in one place.
+    summary.set_width_chars(26);
+    summary.set_max_width_chars(26);
+    summary.set_xalign(0.0);
     summary.set_text("Open a repository");
     summary.set_visible(true);
     let collapse = widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
@@ -404,6 +409,9 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     header.end.set_spacing(4);
     let readout = widgets::label("No repository open", "header-status");
     readout.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    readout.set_width_chars(24);
+    readout.set_max_width_chars(24);
+    readout.set_xalign(1.0);
     readout.set_margin_end(6);
     header.end.append(&readout);
     for b in [&sync.fetch, &sync.pull, &sync.push] {
@@ -413,16 +421,26 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     // Changes filters its files from the header; History has its own find bar.
     let find = widgets::bar_button("system-search-symbolic", "Find commits (Ctrl+F)");
     find.connect_clicked(|_| show_search());
-    header.end.append(&search);
-    header.end.append(&find);
-    search.set_visible(initial == "changes");
-    find.set_visible(initial == "history");
+    // Changes' filter and History's Find share one slot, as wide on every page.
+    let find_slot = gtk::Stack::new();
+    find_slot.set_hhomogeneous(true);
+    find_slot.set_valign(gtk::Align::Center);
+    find.set_halign(gtk::Align::End);
+    find_slot.add_named(&search, Some("search"));
+    find_slot.add_named(&find, Some("find"));
+    find_slot.add_named(&gtk::Box::new(gtk::Orientation::Horizontal, 0), Some("none"));
+    header.end.append(&find_slot);
+    let slot_for = |name: &str| match name {
+        "changes" => "search",
+        "history" => "find",
+        _ => "none",
+    };
+    find_slot.set_visible_child_name(slot_for(&initial));
     {
-        let (search, find) = (search.clone(), find.clone());
+        let find_slot = find_slot.clone();
         view_stack.connect_visible_child_name_notify(move |stack| {
             let name = stack.visible_child_name();
-            search.set_visible(name.as_deref() == Some("changes"));
-            find.set_visible(name.as_deref() == Some("history"));
+            find_slot.set_visible_child_name(slot_for(name.as_deref().unwrap_or_default()));
         });
     }
     header.end.append(&refresh);
@@ -962,8 +980,7 @@ impl Ui {
         let detached = snapshot.as_ref().is_some_and(|s| s.repository.branch == "Detached HEAD");
         self.sync.fetch.set_sensitive(usable);
         self.sync.pull.set_sensitive(usable && upstream);
-        self.sync.pull_count.set_text(&format!("{behind}"));
-        self.sync.pull_count.set_visible(behind > 0);
+        self.sync.pull_count.set_text(&if behind > 0 { behind.to_string() } else { String::new() });
         self.sync.pull.set_tooltip_text(Some(&if behind > 0 {
             format!("Pull {behind} commit{} from the upstream (Ctrl+Shift+L)", if behind == 1 { "" } else { "s" })
         } else {
@@ -972,8 +989,7 @@ impl Ui {
         self.sync.push.set_sensitive(usable && !unborn && !detached);
         if upstream || unborn || detached {
             self.sync.push_icon.set_icon_name(Some("go-up-symbolic"));
-            self.sync.push_count.set_text(&format!("{ahead}"));
-            self.sync.push_count.set_visible(ahead > 0);
+            self.sync.push_count.set_text(&if ahead > 0 { ahead.to_string() } else { String::new() });
             self.sync.push.set_tooltip_text(Some(&if ahead > 0 {
                 format!("Push {ahead} commit{} to the upstream (Ctrl+Alt+P)", if ahead == 1 { "" } else { "s" })
             } else {
@@ -981,7 +997,7 @@ impl Ui {
             }));
         } else {
             self.sync.push_icon.set_icon_name(Some("send-to-symbolic"));
-            self.sync.push_count.set_visible(false);
+            self.sync.push_count.set_text("");
             self.sync.push.set_tooltip_text(Some("Publish: push this branch to a remote and track it (Ctrl+Alt+P)"));
         }
         self.sync.menu.set_sensitive(snapshot.is_some());
