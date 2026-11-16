@@ -93,7 +93,8 @@ pub fn worktree_of<'a>(session: &Session, worktrees: &'a [PathBuf]) -> Option<&'
 }
 /// Show the session in Nyx Agents by running the hub's own argv, without a shell.
 pub fn open(session: &Session) -> anyhow::Result<()> {
-    let (program, args) = session.open.split_first().ok_or_else(|| anyhow::anyhow!("Nyx Agents gave no way to open this session"))?;
+    let (program, args) =
+        session.open.split_first().ok_or_else(|| anyhow::anyhow!("Nyx Agents gave no way to open this session"))?;
     anyhow::ensure!(program == "nyx-agents", "Nyx Agents' open command is unexpected");
     let mut child = std::process::Command::new(program).args(args).stdin(std::process::Stdio::null()).spawn()?;
     std::thread::spawn(move || {

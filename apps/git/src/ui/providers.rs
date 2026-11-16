@@ -723,7 +723,9 @@ pub fn clone_dialog(repo: Repository) {
     browse.connect_clicked(move |_| {
         let dialog = gtk::FileDialog::builder().title("Parent directory for the new clone").build();
         let parent = std::path::PathBuf::from(crate::prefs::get().clone_dir);
-        if parent.is_absolute() && parent.is_dir() { dialog.set_initial_folder(Some(&gio::File::for_path(parent))); }
+        if parent.is_absolute() && parent.is_dir() {
+            dialog.set_initial_folder(Some(&gio::File::for_path(parent)));
+        }
         let p = p.clone();
         let name = name.clone();
         dialog.select_folder(Some(&d), gio::Cancellable::NONE, move |result| match result {

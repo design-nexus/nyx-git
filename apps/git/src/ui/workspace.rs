@@ -72,9 +72,11 @@ impl Ui {
         self.workflow.category.set_selected(0);
         self.workflow.set_message(&state.message);
         self.workflow.amend.set_active(state.amend);
-        self.split.set_position(
-            if self.split.orientation() == gtk::Orientation::Vertical { state.narrow_position.max(200) } else { state.details_position.max(100) },
-        );
+        self.split.set_position(if self.split.orientation() == gtk::Orientation::Vertical {
+            state.narrow_position.max(200)
+        } else {
+            state.details_position.max(100)
+        });
         self.show_view(&state.view);
         self.graph.restore_zoom(state.zoom);
         self.restoring.set(false);
@@ -146,11 +148,15 @@ pub fn external(root: PathBuf, kind: &'static str) {
                 }
                 _ => {
                     let variable = if kind == "editor" { "VISUAL" } else { "TERMINAL" };
-                    let command = std::env::var(variable)
-                        .or_else(|_| if kind == "editor" { std::env::var("EDITOR") } else { Err(std::env::VarError::NotPresent) })
-                        .map_err(|_| {
-                            anyhow::anyhow!("No preferred {kind} configured. Set {variable} or use Omarchy defaults.")
-                        })?;
+                    let command = std::env::var(variable).or_else(|_| {
+                        if kind == "editor" { std::env::var("EDITOR") } else { Err(std::env::VarError::NotPresent) }
+                    });
+                    let command = match command {
+                        Ok(c) => c,
+                        // No editor set: the folder in the file manager, to open from there.
+                        Err(_) if kind == "editor" => "xdg-open".into(),
+                        Err(_) => anyhow::bail!("No terminal is set. Set {variable}, or install xdg-terminal-exec."),
+                    };
                     let mut words = glib::shell_parse_argv(command)?.into_iter();
                     let program = words.next().ok_or_else(|| anyhow::anyhow!("Empty application command"))?;
                     let mut args: Vec<_> = words.collect();

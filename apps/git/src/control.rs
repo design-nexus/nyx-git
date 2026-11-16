@@ -106,9 +106,9 @@ thread_local! {
 pub fn serve(app: &gtk::Application) {
     let id = app.application_id().map(|s| s.to_string()).unwrap_or_else(|| APP.to_string());
     let window_app = app.clone();
-    let Some(service) =
-        nyx_core::control::serve_with(app, description(&id), move |request, answer| handle(&window_app, &request.action, &request.arguments, answer))
-    else {
+    let Some(service) = nyx_core::control::serve_with(app, description(&id), move |request, answer| {
+        handle(&window_app, &request.action, &request.arguments, answer)
+    }) else {
         return;
     };
     service.on_watch(|_, on| {
@@ -140,7 +140,10 @@ fn publish() {
         service.publish("status", json!({"repository": null}));
         return;
     };
-    nyx_core::cmd::background(move || panel_state(&root), move |state| service.publish("status", state.unwrap_or_else(|e| json!({"error": format!("{e:#}")}))));
+    nyx_core::cmd::background(
+        move || panel_state(&root),
+        move |state| service.publish("status", state.unwrap_or_else(|e| json!({"error": format!("{e:#}")}))),
+    );
 }
 fn failed(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::Failed, message)
@@ -161,7 +164,11 @@ fn resolve(path: Option<&str>) -> Result<PathBuf, Error> {
         return Ok(root);
     }
     let p = prefs::get();
-    p.workspace.active.or(p.last_repository).filter(|r| r.is_dir()).ok_or_else(|| invalid("No repository is open; name one with a path"))
+    p.workspace
+        .active
+        .or(p.last_repository)
+        .filter(|r| r.is_dir())
+        .ok_or_else(|| invalid("No repository is open; name one with a path"))
 }
 fn status(root: &std::path::Path) -> anyhow::Result<Value> {
     let s = repository::load_reusing(root, None)?;
@@ -261,15 +268,21 @@ fn flow_summary(root: &std::path::Path) -> anyhow::Result<Value> {
         .collect();
     let agents: Vec<Value> =
         f.agents.iter().map(|(s, w)| json!({"agent": s.agent(), "title": s.title, "state": s.state(), "worktree": w.as_ref().map(|w| w.to_string_lossy())})).collect();
-    let overlaps: Vec<Value> = f.overlaps.iter().map(|o| json!({"branches": [o.a, o.b], "files": o.files.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>()})).collect();
+    let overlaps: Vec<Value> = f
+        .overlaps
+        .iter()
+        .map(|o| json!({"branches": [o.a, o.b], "files": o.files.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>()}))
+        .collect();
     Ok(json!({"trunk": f.trunk, "branches": branches, "agents": agents, "shared_files": overlaps, "untrusted_content": true}))
 }
 fn reviews(root: &std::path::Path) -> anyhow::Result<Value> {
     use nyx_git::providers::{Client, credentials, review};
     let accounts = prefs::get().accounts;
     let snapshot = nyx_git::core::remotes::read(root)?;
-    let remotes: Vec<(String, String)> = snapshot.remotes.iter().flat_map(|r| r.fetch.iter().map(|u| (r.name.clone(), u.clone()))).collect();
-    let (account, path) = review::locate(&accounts, &remotes).ok_or_else(|| anyhow::anyhow!("None of this repository's remotes is on a connected hosting account"))?;
+    let remotes: Vec<(String, String)> =
+        snapshot.remotes.iter().flat_map(|r| r.fetch.iter().map(|u| (r.name.clone(), u.clone()))).collect();
+    let (account, path) = review::locate(&accounts, &remotes)
+        .ok_or_else(|| anyhow::anyhow!("None of this repository's remotes is on a connected hosting account"))?;
     let c = Client::new(account.clone(), credentials::load(&account)?)?;
     let repo = c.find_repository(&path)?;
     let items: Vec<Value> = c
@@ -284,7 +297,9 @@ fn reviews(root: &std::path::Path) -> anyhow::Result<Value> {
 fn panel_state(root: &std::path::Path) -> anyhow::Result<Value> {
     let mut state = status(root)?;
     state["recent"] = history(root, 5).map(|v| v["items"].clone()).unwrap_or_default();
-    state["branches"] = branches(root).map(|v| Value::Array(v["items"].as_array().cloned().unwrap_or_default().into_iter().take(12).collect())).unwrap_or_default();
+    state["branches"] = branches(root)
+        .map(|v| Value::Array(v["items"].as_array().cloned().unwrap_or_default().into_iter().take(12).collect()))
+        .unwrap_or_default();
     state["worktrees"] = worktree_list(root).map(|v| v["items"].clone()).unwrap_or_default();
     Ok(state)
 }
@@ -357,23 +372,31 @@ fn handle(app: &gtk::Application, action: &str, args: &Value, answer: Answer) {
         }
         "repo.fetch" => mutate(root, Operation::Fetch, "Fetched all remotes".into(), answer),
         "repo.switch_branch" => {
-            let Some(branch) = args["branch"].as_str().map(str::trim).filter(|b| !b.is_empty()) else { return answer(Err(invalid("Name a branch"))) };
+            let Some(branch) = args["branch"].as_str().map(str::trim).filter(|b| !b.is_empty()) else {
+                return answer(Err(invalid("Name a branch")));
+            };
             mutate(root, Operation::SwitchBranch(branch.into()), format!("Switched to {branch}"), answer)
         }
         "repo.branch_create" => {
-            let Some(name) = args["name"].as_str().map(str::trim).filter(|b| !b.is_empty()) else { return answer(Err(invalid("Name the branch"))) };
+            let Some(name) = args["name"].as_str().map(str::trim).filter(|b| !b.is_empty()) else {
+                return answer(Err(invalid("Name the branch")));
+            };
             if let Err(e) = nyx_git::core::advanced::valid_ref("refs/heads/", name) {
                 return answer(Err(invalid(format!("{e:#}"))));
             }
             mutate(root, Operation::CreateBranch(name.into()), format!("Created {name} and switched to it"), answer)
         }
         "repo.worktree_create" => {
-            let Some(branch) = args["branch"].as_str().map(|b| b.trim().to_string()).filter(|b| !b.is_empty()) else { return answer(Err(invalid("Name a branch"))) };
+            let Some(branch) = args["branch"].as_str().map(|b| b.trim().to_string()).filter(|b| !b.is_empty()) else {
+                return answer(Err(invalid("Name a branch")));
+            };
             nyx_core::cmd::background(
                 move || -> anyhow::Result<(PathBuf, Operation, PathBuf)> {
                     nyx_git::core::advanced::valid_ref("refs/heads/", &branch)?;
-                    let main = worktrees::list(&root)?.into_iter().find(|w| w.main).map(|w| w.path).unwrap_or_else(|| root.clone());
-                    let slug: String = branch.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
+                    let main =
+                        worktrees::list(&root)?.into_iter().find(|w| w.main).map(|w| w.path).unwrap_or_else(|| root.clone());
+                    let slug: String =
+                        branch.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
                     let name = main.file_name().unwrap_or_default().to_string_lossy().into_owned();
                     let destination = main.parent().unwrap_or(&main).join(format!("{name}-{slug}"));
                     let existing = nyx_git::core::advanced::resolve_target(&root, &format!("refs/heads/{branch}")).ok();
@@ -381,11 +404,14 @@ fn handle(app: &gtk::Application, action: &str, args: &Value, answer: Answer) {
                         Some(tip) => tip.clone(),
                         None => nyx_git::core::advanced::resolve_target(&root, "HEAD")?,
                     };
-                    let action = worktrees::Action::Create { path: destination.clone(), branch, new_branch: existing.is_none(), base };
+                    let action =
+                        worktrees::Action::Create { path: destination.clone(), branch, new_branch: existing.is_none(), base };
                     Ok((root, Operation::Worktree(action), destination))
                 },
                 move |r| match r {
-                    Ok((root, op, destination)) => mutate(root, op, format!("Created a worktree in {}", destination.display()), answer),
+                    Ok((root, op, destination)) => {
+                        mutate(root, op, format!("Created a worktree in {}", destination.display()), answer)
+                    }
                     Err(e) => answer(Err(failed(format!("{e:#}")))),
                 },
             );

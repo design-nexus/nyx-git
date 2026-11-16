@@ -84,7 +84,8 @@ impl ConflictStudio {
             .min_content_width(200)
             .child(&files)
             .build();
-        let (base, ours, theirs, result) = (Rc::new(DiffView::new()), Rc::new(DiffView::new()), Rc::new(DiffView::new()), Rc::new(DiffView::new()));
+        let (base, ours, theirs, result) =
+            (Rc::new(DiffView::new()), Rc::new(DiffView::new()), Rc::new(DiffView::new()), Rc::new(DiffView::new()));
         if let Some(view) = result.root.child().and_downcast::<sourceview5::View>() {
             view.set_editable(true);
             view.upcast_ref::<gtk::TextView>().update_property(&[gtk::accessible::Property::Label("Editable result")]);
@@ -101,7 +102,9 @@ impl ConflictStudio {
         let spacer = widgets::hbox(0);
         spacer.set_hexpand(true);
         tools.append(&spacer);
-        for (icon, tip, step) in [("git-chev-u-symbolic", "Previous conflict (Alt+Up)", -1), ("git-chev-d-symbolic", "Next conflict (Alt+Down)", 1)] {
+        for (icon, tip, step) in
+            [("git-chev-u-symbolic", "Previous conflict (Alt+Up)", -1), ("git-chev-d-symbolic", "Next conflict (Alt+Down)", 1)]
+        {
             let b = widgets::bar_button(icon, tip);
             b.connect_clicked(move |_| studio(|s| s.jump(step)));
             tools.append(&b);
@@ -110,7 +113,9 @@ impl ConflictStudio {
         let choices = widgets::hbox(0);
         choices.add_css_class("segmented");
         choices.add_css_class("git-segments");
-        for (label, choice) in [("Ours", Choice::Ours), ("Theirs", Choice::Theirs), ("Both", Choice::Both), ("Base", Choice::Base)] {
+        for (label, choice) in
+            [("Ours", Choice::Ours), ("Theirs", Choice::Theirs), ("Both", Choice::Both), ("Base", Choice::Base)]
+        {
             let b = gtk::Button::with_label(label);
             b.add_css_class("segment");
             b.set_tooltip_text(Some(match choice {
@@ -238,7 +243,12 @@ impl ConflictStudio {
     /// The conflicted files of the open repository, from its status.
     fn conflicted() -> Vec<PathBuf> {
         current()
-            .and_then(|ui| ui.snapshot.borrow().as_ref().map(|s| s.status.files.iter().filter(|f| f.conflicted).map(|f| f.path.clone()).collect()))
+            .and_then(|ui| {
+                ui.snapshot
+                    .borrow()
+                    .as_ref()
+                    .map(|s| s.status.files.iter().filter(|f| f.conflicted).map(|f| f.path.clone()).collect())
+            })
             .unwrap_or_default()
     }
     /// Show the studio, at `file` or the first conflicted file.
@@ -291,7 +301,8 @@ impl ConflictStudio {
     }
     fn present(&self, c: Conflict) {
         self.title.set_text(&format!("Conflict Studio · {}", c.file.display()));
-        let progress = current().and_then(|ui| ui.snapshot.borrow().as_ref().and_then(|s| s.progress)).map(|p| p.name()).unwrap_or("Merge");
+        let progress =
+            current().and_then(|ui| ui.snapshot.borrow().as_ref().and_then(|s| s.progress)).map(|p| p.name()).unwrap_or("Merge");
         let sides = match progress {
             "Rebase" => "Ours is the branch being rebased onto; theirs is the commit being replayed.",
             _ => "Ours is your current branch; theirs is what's coming in.",
@@ -331,7 +342,8 @@ impl ConflictStudio {
                 b.connect_clicked(move |_| studio(|s| s.whole_file(resolution.clone())));
                 self.whole.append(&b);
             }
-            let sizes = |s: &Option<conflicts::Side>| s.as_ref().map_or("absent".to_string(), |s| format!("{} bytes", s.bytes.len()));
+            let sizes =
+                |s: &Option<conflicts::Side>| s.as_ref().map_or("absent".to_string(), |s| format!("{} bytes", s.bytes.len()));
             self.whole.append(&widgets::label(
                 &format!("Ours: {} · Theirs: {} · Base: {}", sizes(&c.ours), sizes(&c.theirs), sizes(&c.base)),
                 "dim-label",
@@ -428,8 +440,12 @@ impl ConflictStudio {
     fn whole_file(&self, resolution: Resolution) {
         let Some(c) = self.conflict.borrow().clone() else { return };
         let (title, what) = match resolution {
-            Resolution::Delete => ("Resolve as deletion?", "Remove the working file and stage its deletion. Its current contents are lost."),
-            Resolution::Ours => ("Keep our version?", "Replace the working file with our side and stage it. Their changes to it are dropped."),
+            Resolution::Delete => {
+                ("Resolve as deletion?", "Remove the working file and stage its deletion. Its current contents are lost.")
+            }
+            Resolution::Ours => {
+                ("Keep our version?", "Replace the working file with our side and stage it. Their changes to it are dropped.")
+            }
             _ => ("Keep their version?", "Replace the working file with their side and stage it. Our changes to it are dropped."),
         };
         confirm(title, what, "Resolve", move || submit(c.clone(), resolution.clone()));
@@ -445,7 +461,10 @@ impl ConflictStudio {
         let progress = current().and_then(|ui| ui.snapshot.borrow().as_ref().and_then(|s| s.progress));
         self.finish.append(&widgets::label("No conflicted files remain.", "section-title"));
         if let Some(p) = progress {
-            self.finish.append(&widgets::label(&format!("Continue the {} when you're ready, or skip or abort it.", p.name().to_lowercase()), "dim-label"));
+            self.finish.append(&widgets::label(
+                &format!("Continue the {} when you're ready, or skip or abort it.", p.name().to_lowercase()),
+                "dim-label",
+            ));
             let row = widgets::hbox(6);
             row.set_halign(gtk::Align::Center);
             for (label, action) in [
@@ -477,17 +496,23 @@ impl ConflictStudio {
 fn submit(conflict: Conflict, resolution: Resolution) {
     let Some(ui) = current() else { return };
     let file = conflict.file.clone();
-    ui.execute_at_then(conflict.root.clone(), Operation::ResolveConflict { conflict: Box::new(conflict), resolution }, move |result| {
-        studio(|s| match result {
-            Ok(()) => {
-                let next = ConflictStudio::conflicted().into_iter().find(|f| *f != file);
-                match next {
-                    Some(f) => s.open(f),
-                    None => s.done(),
+    ui.execute_at_then(
+        conflict.root.clone(),
+        Operation::ResolveConflict { conflict: Box::new(conflict), resolution },
+        move |result| {
+            studio(|s| match result {
+                Ok(()) => {
+                    let next = ConflictStudio::conflicted().into_iter().find(|f| *f != file);
+                    match next {
+                        Some(f) => s.open(f),
+                        None => s.done(),
+                    }
                 }
-            }
-            // The draft stays in the result for another try.
-            Err(message) => s.note.set_text(&format!("{message}\nYour result is kept. If the repository changed, open the file again.")),
-        })
-    });
+                // The draft stays in the result for another try.
+                Err(message) => {
+                    s.note.set_text(&format!("{message}\nYour result is kept. If the repository changed, open the file again."))
+                }
+            })
+        },
+    );
 }

@@ -25,7 +25,12 @@ fn flow_reports_ancestry_worktrees_agents_and_shared_files_without_inventing_rel
     let root = dir.path().join("repo");
     fs::create_dir(&root).unwrap();
     git(&root, &["init", "-q", "-b", "main"]);
-    for (k, v) in [("user.name", "Flow"), ("user.email", "flow@example.invalid"), ("commit.gpgsign", "false"), ("core.hooksPath", "/dev/null")] {
+    for (k, v) in [
+        ("user.name", "Flow"),
+        ("user.email", "flow@example.invalid"),
+        ("commit.gpgsign", "false"),
+        ("core.hooksPath", "/dev/null"),
+    ] {
         git(&root, &["config", k, v]);
     }
     commit(&root, "shared.rs", "base\n", "Base");

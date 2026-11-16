@@ -26,7 +26,10 @@ struct Split {
     left: Side,
     right: Side,
 }
-fn text_view(buffer: &sourceview5::Buffer, label: &str) -> (sourceview5::View, sourceview5::GutterRendererText, Rc<RefCell<Vec<String>>>) {
+fn text_view(
+    buffer: &sourceview5::Buffer,
+    label: &str,
+) -> (sourceview5::View, sourceview5::GutterRendererText, Rc<RefCell<Vec<String>>>) {
     let view = sourceview5::View::with_buffer(buffer);
     view.set_editable(false);
     view.upcast_ref::<gtk::TextView>().update_property(&[gtk::accessible::Property::Label(label)]);
@@ -72,7 +75,9 @@ fn tag_lines(buffer: &sourceview5::Buffer, kinds: &[Option<&str>], words: &[(usi
         }
     }
     for (line, from, to, kind) in words {
-        if let (Some(start), Some(end)) = (buffer.iter_at_line_offset(*line as i32, *from as i32), buffer.iter_at_line_offset(*line as i32, *to as i32)) {
+        if let (Some(start), Some(end)) =
+            (buffer.iter_at_line_offset(*line as i32, *from as i32), buffer.iter_at_line_offset(*line as i32, *to as i32))
+        {
             buffer.apply_tag_by_name(kind, &start, &end);
         }
     }
@@ -162,7 +167,11 @@ impl DiffView {
             let words: Vec<(usize, usize, usize, &str)> =
                 lines.iter().enumerate().filter_map(|(i, l)| l.word.map(|(a, b, k)| (i, a, b, k))).collect();
             tag_lines(&side.buffer, &kinds, &words);
-            show_numbers(&side.gutter, &side.numbers, lines.iter().map(|l| l.number.map(|n| n.to_string()).unwrap_or_default()).collect());
+            show_numbers(
+                &side.gutter,
+                &side.numbers,
+                lines.iter().map(|l| l.number.map(|n| n.to_string()).unwrap_or_default()).collect(),
+            );
         }
     }
     pub fn recolor(&self) {
@@ -226,8 +235,10 @@ impl DiffView {
         let keep = !current.is_empty() && lines_match(&current, text);
         self.buffer.set_text(text);
         let (kinds, numbers) = annotate(text);
-        let words: Vec<(usize, usize, usize, &str)> =
-            word_spans(text).into_iter().map(|(line, from, to, add)| (line, from, to, if add { "word-add" } else { "word-del" })).collect();
+        let words: Vec<(usize, usize, usize, &str)> = word_spans(text)
+            .into_iter()
+            .map(|(line, from, to, add)| (line, from, to, if add { "word-add" } else { "word-del" }))
+            .collect();
         tag_lines(&self.buffer, &kinds, &words);
         show_numbers(&self.gutter, &self.numbers, numbers);
         if self.side_by_side.get() {

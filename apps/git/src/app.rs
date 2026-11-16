@@ -140,25 +140,36 @@ impl Ui {
     /// Fetch an open repository without requiring it to be the active tab.
     pub fn background_fetch(self: &Rc<Self>, root: PathBuf) {
         let weak = Rc::downgrade(self);
-        nyx_core::cmd::background(move || repository::inspect(&root), move |result| {
-            let Some(ui) = weak.upgrade() else { return };
-            let Ok(repo) = result else { return };
-            if prefs::get().fetch_minutes == 0 || !prefs::get().workspace.open.contains(&repo.root)
-                || ui.tasks.busy(&repo.common_dir) { return; }
-            let operation = nyx_git::core::operations::Operation::Fetch;
-            let Ok((id, control)) = ui.tasks.start(repo.root.clone(), repo.common_dir.clone(), &operation) else { return };
-            ui.update_tasks();
-            let weak = Rc::downgrade(&ui);
-            nyx_core::cmd::background(move || {
-                nyx_git::core::jobs::controlled(control, || nyx_git::core::operations::run(&repo.root, operation))
-                    .map(|_| ()).map_err(|e| format!("{e:#}"))
-            }, move |result| {
+        nyx_core::cmd::background(
+            move || repository::inspect(&root),
+            move |result| {
                 let Some(ui) = weak.upgrade() else { return };
-                ui.tasks.finish(id, result);
+                let Ok(repo) = result else { return };
+                if prefs::get().fetch_minutes == 0
+                    || !prefs::get().workspace.open.contains(&repo.root)
+                    || ui.tasks.busy(&repo.common_dir)
+                {
+                    return;
+                }
+                let operation = nyx_git::core::operations::Operation::Fetch;
+                let Ok((id, control)) = ui.tasks.start(repo.root.clone(), repo.common_dir.clone(), &operation) else { return };
                 ui.update_tasks();
-                ui.refresh();
-            });
-        });
+                let weak = Rc::downgrade(&ui);
+                nyx_core::cmd::background(
+                    move || {
+                        nyx_git::core::jobs::controlled(control, || nyx_git::core::operations::run(&repo.root, operation))
+                            .map(|_| ())
+                            .map_err(|e| format!("{e:#}"))
+                    },
+                    move |result| {
+                        let Some(ui) = weak.upgrade() else { return };
+                        ui.tasks.finish(id, result);
+                        ui.update_tasks();
+                        ui.refresh();
+                    },
+                );
+            },
+        );
     }
 
     pub fn execute_at(self: &Rc<Self>, root: PathBuf, operation: nyx_git::core::operations::Operation) {

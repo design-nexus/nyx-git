@@ -10,7 +10,10 @@ pub fn open() {
         &ui.overlay,
         &ui.window,
         settings_card::Spec {
-            groups: &[("Repositories", "folder-symbolic", "Clone folder, background fetch"), ("Views", "view-reveal-symbolic", "Scrollbars")],
+            groups: &[
+                ("Repositories", "folder-symbolic", "Clone folder, background fetch"),
+                ("Views", "view-reveal-symbolic", "Scrollbars"),
+            ],
             search_text: None,
             standard: Some(Standard {
                 app: "git",
@@ -51,10 +54,23 @@ fn build() -> (gtk::Widget, gtk::Box) {
     folder.set_placeholder_text(Some("Choose a parent folder"));
     folder.set_width_chars(18);
     folder.connect_changed(|e| prefs::update(|p| p.clone_dir = e.text().to_string()));
-    rows.append(&widgets::row("Clone into", "Default parent folder for new clones. Use an absolute path.", Some(folder.upcast_ref())));
-    let (row, _) = widgets::choice_row("Fetch in the background", "Fetch open repositories without merging or changing working files.",
-        vec![("0".into(), "Off".into()), ("5".into(), "Every 5 minutes".into()), ("15".into(), "Every 15 minutes".into()), ("30".into(), "Every 30 minutes".into())],
-        &prefs::get().fetch_minutes.to_string(), |id| prefs::update(|p| p.fetch_minutes = id.parse().unwrap_or(0)));
+    rows.append(&widgets::row(
+        "Clone into",
+        "Default parent folder for new clones. Use an absolute path.",
+        Some(folder.upcast_ref()),
+    ));
+    let (row, _) = widgets::choice_row(
+        "Fetch in the background",
+        "Fetch open repositories without merging or changing working files.",
+        vec![
+            ("0".into(), "Off".into()),
+            ("5".into(), "Every 5 minutes".into()),
+            ("15".into(), "Every 15 minutes".into()),
+            ("30".into(), "Every 30 minutes".into()),
+        ],
+        &prefs::get().fetch_minutes.to_string(),
+        |id| prefs::update(|p| p.fetch_minutes = id.parse().unwrap_or(0)),
+    );
     rows.append(&row);
     let rows = group(&body, "Views");
     let p = prefs::get();

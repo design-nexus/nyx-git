@@ -24,7 +24,13 @@ fn git(root: &Path, args: &[&str]) -> String {
 fn init(root: &Path) {
     fs::create_dir_all(root).unwrap();
     git(root, &["init", "-q", "-b", "main"]);
-    for (k, v) in [("user.name", "Fixture"), ("user.email", "fixture@example.invalid"), ("commit.gpgsign", "false"), ("core.hooksPath", "/dev/null"), ("protocol.file.allow", "always")] {
+    for (k, v) in [
+        ("user.name", "Fixture"),
+        ("user.email", "fixture@example.invalid"),
+        ("commit.gpgsign", "false"),
+        ("core.hooksPath", "/dev/null"),
+        ("protocol.file.allow", "always"),
+    ] {
         git(root, &["config", k, v]);
     }
 }
@@ -104,7 +110,13 @@ fn many_branches_and_worktrees_stay_bounded_and_quick() {
     for i in 0..300 {
         script.push_str(&format!("create refs/heads/b{i:03} HEAD\n"));
     }
-    let mut child = Command::new("git").arg("-C").arg(&root).args(["update-ref", "--stdin"]).stdin(std::process::Stdio::piped()).spawn().unwrap();
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["update-ref", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
     use std::io::Write;
     child.stdin.as_mut().unwrap().write_all(script.as_bytes()).unwrap();
     assert!(child.wait().unwrap().success());
@@ -140,7 +152,8 @@ fn a_merge_in_progress_shows_in_previews_and_activity() {
     commit(&root, "f", "topic\n", "topic");
     git(&root, &["switch", "-q", "main"]);
     commit(&root, "f", "main\n", "main");
-    let out = Command::new("git").arg("-C").arg(&root).args(["merge", "topic"]).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+    let out =
+        Command::new("git").arg("-C").arg(&root).args(["merge", "topic"]).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
     assert!(!out.status.success());
     let p = preview::preview(&root, &Subject::Advanced(Action::Abort)).unwrap();
     assert_eq!(p.at_risk, vec![std::path::PathBuf::from("f")]);

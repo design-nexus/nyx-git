@@ -205,13 +205,14 @@ impl Workflow {
         let spacer = widgets::hbox(0);
         spacer.set_hexpand(true);
         row.append(&spacer);
-        let template = link("Template", "Insert the repository's commit template (commit.template), without its comment lines", || {
-            let Some(ui) = current() else { return };
-            let Some(text) = ui.workflow.template_text.borrow().clone() else { return };
-            let current = ui.workflow.message();
-            ui.workflow.set_message(&if current.trim().is_empty() { text } else { format!("{current}\n{text}") });
-            ui.workflow.summary.grab_focus();
-        });
+        let template =
+            link("Template", "Insert the repository's commit template (commit.template), without its comment lines", || {
+                let Some(ui) = current() else { return };
+                let Some(text) = ui.workflow.template_text.borrow().clone() else { return };
+                let current = ui.workflow.message();
+                ui.workflow.set_message(&if current.trim().is_empty() { text } else { format!("{current}\n{text}") });
+                ui.workflow.summary.grab_focus();
+            });
         template.set_visible(false);
         row.append(&template);
         let last = link("Last message", "Copy the latest commit message into the editor", || {
@@ -340,7 +341,11 @@ impl Workflow {
         self.banner_studio.set_visible(conflicts);
         self.banner_skip.set_visible(matches!(
             progress,
-            Some(nyx_git::core::advanced::Active::Rebase | nyx_git::core::advanced::Active::CherryPick | nyx_git::core::advanced::Active::Revert)
+            Some(
+                nyx_git::core::advanced::Active::Rebase
+                    | nyx_git::core::advanced::Active::CherryPick
+                    | nyx_git::core::advanced::Active::Revert
+            )
         ));
     }
     /// The whole message: the summary, a blank line, then the description.
@@ -403,7 +408,9 @@ impl Workflow {
             b.set_sensitive(partial);
         }
         let tip = if self.diff.side_by_side() { "Switch to Unified to stage parts of a file" } else { "" };
-        for (b, normal) in [(&self.hunk, "Stage the diff hunk at the cursor"), (&self.lines, "Stage selected added or removed lines")] {
+        for (b, normal) in
+            [(&self.hunk, "Stage the diff hunk at the cursor"), (&self.lines, "Stage selected added or removed lines")]
+        {
             b.set_tooltip_text(Some(if tip.is_empty() { normal } else { tip }));
         }
         self.discard.set_visible(unstaged);
@@ -494,11 +501,14 @@ fn file_menu() -> Vec<menu::Entry> {
     out.push(menu::item("File history…", super::file_history::selected_change).icon("git-history-symbolic"));
     out.push(menu::item("Blame…", blame_selected).icon("git-user-symbolic").enabled(file.index != '?' && file.worktree != 'D'));
     let path = file.path.clone();
-    out.push(menu::item("Copy path", move || {
-        if let Some(ui) = current() {
-            gtk::prelude::WidgetExt::display(&ui.window).clipboard().set_text(&path.to_string_lossy());
-        }
-    }).icon("git-copy-symbolic"));
+    out.push(
+        menu::item("Copy path", move || {
+            if let Some(ui) = current() {
+                gtk::prelude::WidgetExt::display(&ui.window).clipboard().set_text(&path.to_string_lossy());
+            }
+        })
+        .icon("git-copy-symbolic"),
+    );
     if !staged && !file.conflicted {
         out.push(menu::separator());
         out.push(menu::item("Discard changes…", discard).icon("git-trash-symbolic").danger());
@@ -615,9 +625,8 @@ impl super::window::Ui {
         self.workflow.template.set_visible(false);
         nyx_core::cmd::background(
             move || {
-                let text = nyx_git::core::files::commit_template(&root).map(|t| {
-                    t.lines().filter(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n").trim_end().to_string()
-                });
+                let text = nyx_git::core::files::commit_template(&root)
+                    .map(|t| t.lines().filter(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n").trim_end().to_string());
                 (root, text.filter(|t| !t.trim().is_empty()))
             },
             |(root, text)| {
@@ -646,7 +655,9 @@ impl super::window::Ui {
         let Some(root) = self.root() else { return };
         let cached = self.workflow.cached();
         if file.conflicted {
-            show("This file has unresolved conflicts. Resolve opens it in Conflict Studio: compare base, ours and theirs, choose a result, and mark it resolved.");
+            show(
+                "This file has unresolved conflicts. Resolve opens it in Conflict Studio: compare base, ours and theirs, choose a result, and mark it resolved.",
+            );
             return;
         }
         if cached && (file.index == '.' || file.index == '?') {
@@ -674,7 +685,8 @@ impl super::window::Ui {
                                 .set_text("Diff exceeds 2 MiB. Use whole-file staging or inspect it in an external tool.");
                             return;
                         }
-                        let binary = bytes.split(|b| *b == b'\n').any(|l| l.starts_with(b"Binary files ") && l.ends_with(b" differ"));
+                        let binary =
+                            bytes.split(|b| *b == b'\n').any(|l| l.starts_with(b"Binary files ") && l.ends_with(b" differ"));
                         ui.workflow.diff.set_text(if bytes.is_empty() {
                             "No changes on this side of the index."
                         } else if binary {

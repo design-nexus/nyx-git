@@ -114,7 +114,12 @@ impl CommitDetails {
             b
         };
         actions.append(&target("git-branch-symbolic", "Branch here", "Create a branch at this commit", "branch"));
-        actions.append(&target("git-cherry-symbolic", "Cherry-pick", "Apply this commit's changes on the current branch", "cherry"));
+        actions.append(&target(
+            "git-cherry-symbolic",
+            "Cherry-pick",
+            "Apply this commit's changes on the current branch",
+            "cherry",
+        ));
         let more = widgets::bar_button("git-more-symbolic", "Check out, revert, reset, tag and compare (Shift+F10)");
         more.connect_clicked(|_| {
             if let Some(ui) = current() {
@@ -196,7 +201,9 @@ impl CommitDetails {
     }
     /// The commit's own parts, shown once one is loaded.
     fn show_commit(&self, shown: bool) {
-        for w in [self.hash.upcast_ref::<gtk::Widget>(), self.person.upcast_ref(), self.card.upcast_ref(), self.actions.upcast_ref()] {
+        for w in
+            [self.hash.upcast_ref::<gtk::Widget>(), self.person.upcast_ref(), self.card.upcast_ref(), self.actions.upcast_ref()]
+        {
             w.set_visible(shown);
         }
         if let Some(top) = self.hash.parent() {

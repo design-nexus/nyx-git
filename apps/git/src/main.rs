@@ -1,6 +1,6 @@
-mod dialog_dismissal;
 mod app;
 mod control;
+mod dialog_dismissal;
 mod prefs;
 mod theme;
 mod ui;

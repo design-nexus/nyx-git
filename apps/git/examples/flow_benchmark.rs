@@ -17,17 +17,37 @@ fn main() {
     std::fs::create_dir(&root).unwrap();
     git(&root, &["init", "-q", "-b", "main"]);
     // The trunk and one commit per branch, written by fast-import.
-    let mut import = Command::new("git").arg("-C").arg(&root).args(["fast-import", "--quiet"]).stdin(std::process::Stdio::piped()).spawn().unwrap();
+    let mut import = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["fast-import", "--quiet"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
     let input = import.stdin.as_mut().unwrap();
     for i in 0..commits {
         let message = format!("Commit {i}\n");
-        writeln!(input, "commit refs/heads/main\nmark :{}\ncommitter Bench <b@example.invalid> {} +0000\ndata {}\n{message}", i + 1, 1_700_000_000 + i, message.len()).unwrap();
+        writeln!(
+            input,
+            "commit refs/heads/main\nmark :{}\ncommitter Bench <b@example.invalid> {} +0000\ndata {}\n{message}",
+            i + 1,
+            1_700_000_000 + i,
+            message.len()
+        )
+        .unwrap();
         writeln!(input, "M 644 inline file{}\ndata 2\n{}\n", i % 64, i % 10).unwrap();
     }
     for b in 0..branches {
         let base = commits - 1 - (b * 7) % commits.min(5000);
         let message = format!("Work on branch {b}\n");
-        writeln!(input, "commit refs/heads/topic/{b:04}\ncommitter Bench <b@example.invalid> {} +0000\ndata {}\n{message}from :{}", 1_800_000_000 + b, message.len(), base + 1).unwrap();
+        writeln!(
+            input,
+            "commit refs/heads/topic/{b:04}\ncommitter Bench <b@example.invalid> {} +0000\ndata {}\n{message}from :{}",
+            1_800_000_000 + b,
+            message.len(),
+            base + 1
+        )
+        .unwrap();
         writeln!(input, "M 644 inline topic{}\ndata 2\nx\n", b % 32).unwrap();
     }
     drop(import.stdin.take());

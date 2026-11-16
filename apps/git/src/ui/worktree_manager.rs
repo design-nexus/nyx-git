@@ -171,7 +171,10 @@ pub fn show() {
 pub fn remove_at(root: PathBuf, path: PathBuf) {
     nyx_core::cmd::background(
         move || -> anyhow::Result<_> {
-            let expected = worktrees::list(&root)?.into_iter().find(|w| w.path == path).ok_or_else(|| anyhow::anyhow!("The worktree is no longer registered"))?;
+            let expected = worktrees::list(&root)?
+                .into_iter()
+                .find(|w| w.path == path)
+                .ok_or_else(|| anyhow::anyhow!("The worktree is no longer registered"))?;
             let guard = worktrees::removal_guard(&root, &expected)?;
             Ok((root, expected, guard))
         },
@@ -180,7 +183,10 @@ pub fn remove_at(root: PathBuf, path: PathBuf) {
                 root.clone(),
                 nyx_git::core::preview::Subject::RemoveWorktree(expected.path.clone()),
                 "Remove clean worktree?".into(),
-                format!("Delete the checkout directory {} and its Git worktree registration. The associated branch remains.", expected.path.display()),
+                format!(
+                    "Delete the checkout directory {} and its Git worktree registration. The associated branch remains.",
+                    expected.path.display()
+                ),
                 "Remove worktree".into(),
                 true,
                 move || {
@@ -243,7 +249,8 @@ pub fn create_for(root: PathBuf, branch_name: Option<String>, base_target: Optio
             let new_branch = gtk::CheckButton::with_label("Create a new branch");
             new_branch.set_active(branch_name.is_none());
             // Suggest a sibling folder of the main checkout, named after the branch.
-            let slug = |b: &str| b.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect::<String>();
+            let slug =
+                |b: &str| b.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect::<String>();
             if let Some(b) = &branch_name
                 && let Some(parent) = root.parent()
             {

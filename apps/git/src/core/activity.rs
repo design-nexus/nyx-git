@@ -143,14 +143,8 @@ pub fn read(root: &Path, common_dir: &Path) -> Result<Vec<Event>> {
         .map(|e| {
             let main = e.head().or_else(|| e.changes.first());
             let worktree = e.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let refs = e
-                .changes
-                .iter()
-                .filter(|c| c.name != "HEAD")
-                .map(|c| short(&c.name))
-                .take(3)
-                .collect::<Vec<_>>()
-                .join(", ");
+            let refs =
+                e.changes.iter().filter(|c| c.name != "HEAD").map(|c| short(&c.name)).take(3).collect::<Vec<_>>().join(", ");
             Event {
                 time: e.time,
                 kind: Kind::classify(&e.operation),
@@ -170,7 +164,8 @@ pub fn read(root: &Path, common_dir: &Path) -> Result<Vec<Event>> {
         .collect();
     let log = reflog(root, REFLOG_LIMIT)?;
     for (i, (id, time, subject)) in log.iter().enumerate() {
-        let explained = entries.iter().any(|e| (e.time - time).abs() <= 10 && e.head().and_then(|h| h.after.as_deref()) == Some(id));
+        let explained =
+            entries.iter().any(|e| (e.time - time).abs() <= 10 && e.head().and_then(|h| h.after.as_deref()) == Some(id));
         if explained {
             continue;
         }

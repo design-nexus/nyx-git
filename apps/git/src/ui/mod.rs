@@ -1,30 +1,30 @@
+pub mod activity;
 pub mod advanced;
 pub mod blame;
 pub mod changes;
 pub mod commit_details;
-pub mod destinations;
-pub mod dev;
-pub mod header;
-pub mod icons;
-pub mod inspector;
-pub mod pagebar;
-pub mod layout;
-pub mod pages;
-pub mod palette;
-pub mod preview;
-pub mod activity;
-pub mod flow;
 pub mod commit_graph;
 pub mod conflict_editor;
 pub mod conflict_studio;
-pub mod rebase_studio;
-pub mod review;
+pub mod destinations;
+pub mod dev;
 pub mod diff_view;
 pub mod file_history;
+pub mod flow;
 pub mod graph_renderer;
+pub mod header;
+pub mod icons;
 pub mod initialize;
+pub mod inspector;
+pub mod layout;
+pub mod pagebar;
+pub mod pages;
+pub mod palette;
+pub mod preview;
+pub mod rebase_studio;
 pub mod remotes;
 pub mod repository_actions;
+pub mod review;
 pub mod scrollbars;
 pub mod settings;
 pub mod sidebar;
@@ -60,7 +60,8 @@ pub fn compact_dropdown(dropdown: &gtk::DropDown) {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let text = item.item().unwrap().downcast::<gtk::StringObject>().unwrap().string();
             let child = item.child().unwrap();
-            let label = child.downcast_ref::<gtk::Label>().cloned().or_else(|| child.first_child().and_downcast::<gtk::Label>()).unwrap();
+            let label =
+                child.downcast_ref::<gtk::Label>().cloned().or_else(|| child.first_child().and_downcast::<gtk::Label>()).unwrap();
             label.set_text(&text);
             label.set_tooltip_text(Some(&text));
             if let Some(check) = child.last_child().and_downcast::<gtk::Image>() {
@@ -218,12 +219,15 @@ pub fn name_icon_buttons(root: &gtk::Widget) {
             continue;
         }
         let has_text = w.downcast_ref::<gtk::Button>().and_then(|b| b.label()).is_some()
-            || w.first_child().is_some_and(|c| c.is::<gtk::Label>() || c.first_child().is_some_and(|g| g.is::<gtk::Label>() && g.next_sibling().is_none()));
+            || w.first_child().is_some_and(|c| {
+                c.is::<gtk::Label>() || c.first_child().is_some_and(|g| g.is::<gtk::Label>() && g.next_sibling().is_none())
+            });
         if has_text {
             continue;
         }
         if let Some(tip) = w.tooltip_text() {
-            let name = tip.split(" (").next().unwrap_or(&tip).split('\n').next().unwrap_or_default().trim_end_matches('…').to_string();
+            let name =
+                tip.split(" (").next().unwrap_or(&tip).split('\n').next().unwrap_or_default().trim_end_matches('…').to_string();
             if !name.is_empty() {
                 w.update_property(&[gtk::accessible::Property::Label(&name)]);
             }

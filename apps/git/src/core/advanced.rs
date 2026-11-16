@@ -169,19 +169,58 @@ pub struct Step {
 pub enum Action {
     Merge(String),
     Rebase(String),
-    CherryPick { id: String, mainline: Option<u32> },
-    Revert { id: String, mainline: Option<u32> },
-    Reset { target: String, mode: ResetMode },
-    Interactive { base: String, steps: Vec<Step>, editor: PathBuf },
-    Squash { base: String, message: String },
-    CreateTag { name: String, target: String, message: String },
-    DeleteTag { name: String, expected: String },
-    DeleteBranch { branch: String, expected: String },
-    BranchAt { name: String, target: String },
-    SwitchNew { name: String, target: String },
+    CherryPick {
+        id: String,
+        mainline: Option<u32>,
+    },
+    Revert {
+        id: String,
+        mainline: Option<u32>,
+    },
+    Reset {
+        target: String,
+        mode: ResetMode,
+    },
+    Interactive {
+        base: String,
+        steps: Vec<Step>,
+        editor: PathBuf,
+    },
+    Squash {
+        base: String,
+        message: String,
+    },
+    CreateTag {
+        name: String,
+        target: String,
+        message: String,
+    },
+    DeleteTag {
+        name: String,
+        expected: String,
+    },
+    DeleteBranch {
+        branch: String,
+        expected: String,
+    },
+    BranchAt {
+        name: String,
+        target: String,
+    },
+    SwitchNew {
+        name: String,
+        target: String,
+    },
     Checkout(String),
-    ForcePush { remote: String, branch: String, lease: String },
-    Discard { file: PathBuf, untracked: bool },
+    ForcePush {
+        remote: String,
+        branch: String,
+        lease: String,
+    },
+    Discard {
+        file: PathBuf,
+        untracked: bool,
+    },
     Continue,
     /// Leave out the commit the operation stopped at.
     Skip,
@@ -435,7 +474,11 @@ fn prepare_studio(git_dir: &Path, steps: &[Step], editor: &Path) -> Result<()> {
     let link = dir.join("nyx-git-message-editor");
     std::os::unix::fs::symlink(editor, &link)?;
     let studio = Studio {
-        messages: steps.iter().filter(|s| s.action == Pick::Reword).filter_map(|s| Some((s.id.clone(), s.message.clone()?))).collect(),
+        messages: steps
+            .iter()
+            .filter(|s| s.action == Pick::Reword)
+            .filter_map(|s| Some((s.id.clone(), s.message.clone()?)))
+            .collect(),
         splits: steps.iter().filter(|s| s.action == Pick::Split).map(|s| s.id.clone()).collect(),
         handled: Vec::new(),
     };
@@ -464,7 +507,9 @@ fn after_rebase(root: &Path, git_dir: &Path) -> Result<Option<String>> {
     if !matches!(command.as_str(), "edit" | "e") {
         return Ok(None);
     }
-    let Some(full) = studio.splits.iter().find(|s| s.starts_with(&id) && !studio.handled.contains(s)).cloned() else { return Ok(None) };
+    let Some(full) = studio.splits.iter().find(|s| s.starts_with(&id) && !studio.handled.contains(s)).cloned() else {
+        return Ok(None);
+    };
     studio.handled.push(full.clone());
     write_studio(git_dir, &studio)?;
     // Git writes `amend` when it stops cleanly after an edit step; a conflict stop has none.
@@ -543,9 +588,20 @@ pub fn facts(root: &Path, base: &str) -> Result<Facts> {
             files.entry(id.clone()).or_default().push(PathBuf::from(line));
         }
     }
-    let ids: Vec<String> = String::from_utf8_lossy(&git(root, "List range", args(&["rev-list", &range]), None, &[])?).lines().map(String::from).collect();
-    let unpublished: std::collections::HashSet<String> =
-        String::from_utf8_lossy(&git(root, "Check published commits", args(&["rev-list", &range, "--not", "--remotes"]), None, &[])?).lines().map(String::from).collect();
+    let ids: Vec<String> = String::from_utf8_lossy(&git(root, "List range", args(&["rev-list", &range]), None, &[])?)
+        .lines()
+        .map(String::from)
+        .collect();
+    let unpublished: std::collections::HashSet<String> = String::from_utf8_lossy(&git(
+        root,
+        "Check published commits",
+        args(&["rev-list", &range, "--not", "--remotes"]),
+        None,
+        &[],
+    )?)
+    .lines()
+    .map(String::from)
+    .collect();
     let published = ids.iter().filter(|id| !unpublished.contains(*id)).cloned().collect();
     let raw = git(root, "Read messages", args(&["log", "--format=%H%x00%B%x00", &range]), None, &[])?;
     let mut messages = std::collections::HashMap::new();
@@ -556,9 +612,17 @@ pub fn facts(root: &Path, base: &str) -> Result<Facts> {
             messages.insert(id, String::from_utf8_lossy(body).trim().to_string());
         }
     }
-    let branch = String::from_utf8_lossy(&git(root, "Read branch", args(&["rev-parse", "--abbrev-ref", "HEAD"]), None, &[])?).trim().to_string();
+    let branch = String::from_utf8_lossy(&git(root, "Read branch", args(&["rev-parse", "--abbrev-ref", "HEAD"]), None, &[])?)
+        .trim()
+        .to_string();
     let set: std::collections::HashSet<&String> = ids.iter().collect();
-    let refs = git(root, "Read references", args(&["for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads", "refs/tags"]), None, &[])?;
+    let refs = git(
+        root,
+        "Read references",
+        args(&["for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads", "refs/tags"]),
+        None,
+        &[],
+    )?;
     let other_refs = String::from_utf8_lossy(&refs)
         .lines()
         .filter_map(|l| l.split_once(' '))
@@ -601,7 +665,11 @@ pub fn proposed(steps: &[Step]) -> Vec<Proposed> {
 }
 /// Where reordering may conflict: a commit moved before one it used to follow, when both
 /// change the same file. A forecast, not a promise either way.
-pub fn reorder_warnings(original: &[Step], steps: &[Step], files: &std::collections::HashMap<String, Vec<PathBuf>>) -> Vec<String> {
+pub fn reorder_warnings(
+    original: &[Step],
+    steps: &[Step],
+    files: &std::collections::HashMap<String, Vec<PathBuf>>,
+) -> Vec<String> {
     let position: std::collections::HashMap<&str, usize> = original.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
     let kept: Vec<&Step> = steps.iter().filter(|s| s.action != Pick::Drop).collect();
     let mut out = Vec::new();
@@ -630,7 +698,10 @@ pub fn reorder_warnings(original: &[Step], steps: &[Step], files: &std::collecti
     // Dropping a commit that later kept commits build on.
     for (i, s) in steps.iter().enumerate().filter(|(_, s)| s.action == Pick::Drop) {
         let touched = files.get(&s.id).cloned().unwrap_or_default();
-        if steps[i + 1..].iter().any(|t| t.action != Pick::Drop && files.get(&t.id).is_some_and(|g| g.iter().any(|f| touched.contains(f)))) {
+        if steps[i + 1..]
+            .iter()
+            .any(|t| t.action != Pick::Drop && files.get(&t.id).is_some_and(|g| g.iter().any(|f| touched.contains(f))))
+        {
             out.push(format!("{} is dropped, but later commits change the same files.", &s.id[..s.id.len().min(8)]));
         }
     }
@@ -733,11 +804,12 @@ pub fn run(root: &Path, action: Action, guard: &Guard) -> Result<Vec<u8>> {
         prepare_studio(&git_dir, steps, editor)?;
     }
     let studio_editor = studio_dir(&git_dir).join("nyx-git-message-editor");
-    let editor: OsString = if matches!(action, Action::Interactive { .. } | Action::Continue | Action::Skip) && studio_editor.exists() {
-        studio_editor.into_os_string()
-    } else {
-        "true".into()
-    };
+    let editor: OsString =
+        if matches!(action, Action::Interactive { .. } | Action::Continue | Action::Skip) && studio_editor.exists() {
+            studio_editor.into_os_string()
+        } else {
+            "true".into()
+        };
     let env = [("GIT_EDITOR".into(), editor)];
     let result = match &action {
         Action::Interactive { steps, editor, .. } => {

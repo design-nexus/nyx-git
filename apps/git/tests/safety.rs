@@ -21,7 +21,12 @@ fn git(root: &Path, args: &[&str]) -> String {
 }
 fn repo(dir: &Path) {
     git(dir, &["init", "-b", "main"]);
-    for (k, v) in [("user.name", "Safety"), ("user.email", "safety@example.invalid"), ("commit.gpgsign", "false"), ("core.hooksPath", "/dev/null")] {
+    for (k, v) in [
+        ("user.name", "Safety"),
+        ("user.email", "safety@example.invalid"),
+        ("commit.gpgsign", "false"),
+        ("core.hooksPath", "/dev/null"),
+    ] {
         git(dir, &["config", k, v]);
     }
 }

@@ -643,29 +643,81 @@ mod tests {
             } else {
                 json!({"full_name":"team/project","html_url":"https://forge.example/team/project","clone_url":"https://forge.example/team/project.git"})
             };
-            let (find, repo_path, pulls) =
-                if gl { (format!("{prefix}/projects/team%2Fsub%2Fproject"), "projects/73", "merge_requests") } else { (format!("{prefix}/repos/team/project"), "repos/team/project", "pulls") };
+            let (find, repo_path, pulls) = if gl {
+                (format!("{prefix}/projects/team%2Fsub%2Fproject"), "projects/73", "merge_requests")
+            } else {
+                (format!("{prefix}/repos/team/project"), "repos/team/project", "pulls")
+            };
             let mut expected = vec![Expected { method: "GET", path: find, response: repo_json, body: None }];
             match kind {
                 Kind::Github => {
-                    expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/commits/{sha}/check-runs?per_page=100"), response: json!({"check_runs":[]}), body: None });
-                    expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/commits/{sha}/status"), response: json!({"statuses":[{"context":"ci","state":"success"}]}), body: None });
+                    expected.push(Expected {
+                        method: "GET",
+                        path: format!("{prefix}/{repo_path}/commits/{sha}/check-runs?per_page=100"),
+                        response: json!({"check_runs":[]}),
+                        body: None,
+                    });
+                    expected.push(Expected {
+                        method: "GET",
+                        path: format!("{prefix}/{repo_path}/commits/{sha}/status"),
+                        response: json!({"statuses":[{"context":"ci","state":"success"}]}),
+                        body: None,
+                    });
                 }
-                Kind::Gitlab => expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/repository/commits/{sha}/statuses"), response: json!([{"name":"ci","status":"success"}]), body: None }),
-                _ => expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/commits/{sha}/statuses?limit=50"), response: json!([{"context":"ci","status":"success"}]), body: None }),
+                Kind::Gitlab => expected.push(Expected {
+                    method: "GET",
+                    path: format!("{prefix}/{repo_path}/repository/commits/{sha}/statuses"),
+                    response: json!([{"name":"ci","status":"success"}]),
+                    body: None,
+                }),
+                _ => expected.push(Expected {
+                    method: "GET",
+                    path: format!("{prefix}/{repo_path}/commits/{sha}/statuses?limit=50"),
+                    response: json!([{"context":"ci","status":"success"}]),
+                    body: None,
+                }),
             }
-            let files = if gl { json!({"changes":[{"new_path":"a.rs"}]}) } else { json!([{"filename":"a.rs","status":"modified","additions":1,"deletions":2}]) };
-            expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/{pulls}/7/{}", if gl { "changes" } else { "files" }), response: files, body: None });
-            let commits = if gl { json!([{"id":sha.clone(),"title":"Change","author_name":"Ada"}]) } else { json!([{"sha":sha.clone(),"commit":{"message":"Change\n\nBody","author":{"name":"Ada"}}}]) };
-            expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/{pulls}/7/commits"), response: commits, body: None });
-            let reviews = if gl { json!({"approved_by":[]}) } else { json!([{"user":{"login":"bo"},"state":"APPROVED","body":"ok"}]) };
-            expected.push(Expected { method: "GET", path: format!("{prefix}/{repo_path}/{pulls}/7/{}", if gl { "approvals" } else { "reviews" }), response: reviews, body: None });
+            let files = if gl {
+                json!({"changes":[{"new_path":"a.rs"}]})
+            } else {
+                json!([{"filename":"a.rs","status":"modified","additions":1,"deletions":2}])
+            };
+            expected.push(Expected {
+                method: "GET",
+                path: format!("{prefix}/{repo_path}/{pulls}/7/{}", if gl { "changes" } else { "files" }),
+                response: files,
+                body: None,
+            });
+            let commits = if gl {
+                json!([{"id":sha.clone(),"title":"Change","author_name":"Ada"}])
+            } else {
+                json!([{"sha":sha.clone(),"commit":{"message":"Change\n\nBody","author":{"name":"Ada"}}}])
+            };
+            expected.push(Expected {
+                method: "GET",
+                path: format!("{prefix}/{repo_path}/{pulls}/7/commits"),
+                response: commits,
+                body: None,
+            });
+            let reviews =
+                if gl { json!({"approved_by":[]}) } else { json!([{"user":{"login":"bo"},"state":"APPROVED","body":"ok"}]) };
+            expected.push(Expected {
+                method: "GET",
+                path: format!("{prefix}/{repo_path}/{pulls}/7/{}", if gl { "approvals" } else { "reviews" }),
+                response: reviews,
+                body: None,
+            });
             let (method, body) = match kind {
                 Kind::Github => ("PUT", json!({"sha":sha.clone(),"merge_method":"merge"})),
                 Kind::Gitlab => ("PUT", json!({"sha":sha.clone()})),
                 _ => ("POST", json!({"Do":"merge","head_commit_id":sha.clone()})),
             };
-            expected.push(Expected { method, path: format!("{prefix}/{repo_path}/{pulls}/7/merge"), response: json!({}), body: Some(body) });
+            expected.push(Expected {
+                method,
+                path: format!("{prefix}/{repo_path}/{pulls}/7/merge"),
+                response: json!({}),
+                body: Some(body),
+            });
             let (client, server) = server(kind, expected);
             let repo = client.find_repository(if gl { "team/sub/project" } else { "team/project.git" }).unwrap();
             let checks = client.checks(&repo, &sha).unwrap();
@@ -675,7 +727,10 @@ mod tests {
             assert_eq!(client.reviews(&repo, 7).unwrap().len(), if gl { 0 } else { 1 });
             client.merge(&repo, 7, &sha, review::MergeMethod::Merge).unwrap();
             if gl {
-                assert!(client.merge(&repo, 7, &sha, review::MergeMethod::Squash).is_err(), "GitLab merges as the project is set");
+                assert!(
+                    client.merge(&repo, 7, &sha, review::MergeMethod::Squash).is_err(),
+                    "GitLab merges as the project is set"
+                );
             }
             server.join().unwrap();
         }

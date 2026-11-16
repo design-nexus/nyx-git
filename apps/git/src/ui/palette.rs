@@ -92,13 +92,20 @@ fn commands() -> Vec<Entry> {
             }
         }),
         c("Commit staged changes", "Ctrl+Enter", "object-select-symbolic", super::workflow::commit),
-        c("Branches…", "Create, rename, switch and delete branches", "media-playlist-consecutive-symbolic", super::repository_actions::branches),
+        c(
+            "Branches…",
+            "Create, rename, switch and delete branches",
+            "media-playlist-consecutive-symbolic",
+            super::repository_actions::branches,
+        ),
         c("Stashes…", "Save, apply and drop stashes", "folder-symbolic", super::repository_actions::stashes),
         c("Remotes…", "Add, rename and edit remotes", "network-server-symbolic", super::remotes::show),
         c("Worktrees…", "Create, lock and remove worktrees", "folder-open-symbolic", super::worktree_manager::show),
         c("Submodules…", "Initialize and update submodules", "folder-symbolic", super::submodules::show),
         c("Git LFS…", "Track patterns and fetch objects", "folder-download-symbolic", super::lfs::show),
-        c("Git actions…", "Merge, rebase, cherry-pick, revert, reset, tags", "system-run-symbolic", || super::advanced::show(None)),
+        c("Git actions…", "Merge, rebase, cherry-pick, revert, reset, tags", "system-run-symbolic", || {
+            super::advanced::show(None)
+        }),
         c("Recovery points…", "Commits Nyx Git kept, and HEAD's reflog", "edit-undo-symbolic", super::advanced::recovery),
         c("Operation history…", "Jobs this session, with retry and stop", "view-list-symbolic", super::tasks::show),
         c("Resolve conflicts…", "Open a conflicted file", "dialog-warning-symbolic", super::conflict_editor::choose),
@@ -117,8 +124,20 @@ fn commands() -> Vec<Entry> {
         c("Keyboard shortcuts", "F1", "input-keyboard-symbolic", super::window::show_shortcuts),
     ];
     out.push(entry(Kind::Command, "folder-symbolic", "Open folder", "The repository in the file manager", external("folder")));
-    out.push(entry(Kind::Command, "document-edit-symbolic", "Open in editor", "The repository in your editor", external("editor")));
-    out.push(entry(Kind::Command, "utilities-terminal-symbolic", "Open in terminal", "A terminal in the repository", external("terminal")));
+    out.push(entry(
+        Kind::Command,
+        "document-edit-symbolic",
+        "Open in editor",
+        "The repository in your editor",
+        external("editor"),
+    ));
+    out.push(entry(
+        Kind::Command,
+        "utilities-terminal-symbolic",
+        "Open in terminal",
+        "A terminal in the repository",
+        external("terminal"),
+    ));
     out
 }
 fn pages() -> Vec<Entry> {
@@ -158,7 +177,10 @@ fn inventory() -> Vec<Entry> {
     for group in data.groups {
         for item in group.items {
             match (&group.kind, item.action) {
-                (Group::Local | Group::RemoteBranch | Group::Tag, Action::Reference { reference, current: is_current, commit }) => {
+                (
+                    Group::Local | Group::RemoteBranch | Group::Tag,
+                    Action::Reference { reference, current: is_current, commit },
+                ) => {
                     let show = {
                         let reference = reference.clone();
                         with_ui(move |ui| {

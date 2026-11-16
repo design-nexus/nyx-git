@@ -127,7 +127,9 @@ impl CommitGraph {
         collapse.set_child(Some(&inside));
         collapse.add_css_class("git-bar-action");
         collapse.add_css_class("git-toggle");
-        collapse.set_tooltip_text(Some("Collapse merged branches: follow first parents only, so each merge stands for the branch it brought in"));
+        collapse.set_tooltip_text(Some(
+            "Collapse merged branches: follow first parents only, so each merge stands for the branch it brought in",
+        ));
         collapse.set_active(prefs::get().first_parent);
         collapse.connect_toggled(|b| {
             prefs::update(|p| p.first_parent = b.is_active());
@@ -221,7 +223,8 @@ impl CommitGraph {
         let first = (self.adjustment.value() / self.step()).floor();
         self.timeline.set(on);
         self.update_adjustment();
-        self.adjustment.set_value((first * self.step()).clamp(0.0, (self.adjustment.upper() - self.adjustment.page_size()).max(0.0)));
+        self.adjustment
+            .set_value((first * self.step()).clamp(0.0, (self.adjustment.upper() - self.adjustment.page_size()).max(0.0)));
         self.canvas.queue_draw();
         self.poll();
     }
@@ -415,7 +418,11 @@ impl CommitGraph {
                 if row.commit.shallow {
                     "\nShallow history boundary".to_string()
                 } else if row.commit.collapsed > 0 {
-                    format!("\nMerge: {} merged parent{} collapsed", row.commit.collapsed, if row.commit.collapsed == 1 { "" } else { "s" })
+                    format!(
+                        "\nMerge: {} merged parent{} collapsed",
+                        row.commit.collapsed,
+                        if row.commit.collapsed == 1 { "" } else { "s" }
+                    )
                 } else {
                     String::new()
                 },

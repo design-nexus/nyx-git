@@ -154,7 +154,8 @@ impl Header {
     }
     fn describe(&self) {
         let (path, status) = self.about.borrow().clone();
-        let lines: Vec<&str> = [path.as_str(), status.as_str(), "Repositories (Ctrl+K)"].into_iter().filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> =
+            [path.as_str(), status.as_str(), "Repositories (Ctrl+K)"].into_iter().filter(|l| !l.is_empty()).collect();
         self.repo.set_tooltip_text(Some(&lines.join("\n")));
     }
     /// The branch, with an operation in progress after it in the warning tint.
@@ -578,20 +579,17 @@ fn repositories(anchor: &gtk::Button) {
             return None;
         }
         let open = path.clone();
-        let mut c = choice(
-            icon,
-            path.file_name().unwrap_or_default().to_string_lossy(),
-            nyx_core::paths::pretty(path),
-            move || {
+        let mut c =
+            choice(icon, path.file_name().unwrap_or_default().to_string_lossy(), nyx_core::paths::pretty(path), move || {
                 if let Some(ui) = current() {
                     ui.open(open.clone());
                 }
-            },
-        );
+            });
         c.current = active.as_ref() == Some(path);
         Some(c)
     };
-    let mut sections = vec![("Open".to_string(), p.workspace.open.iter().filter_map(|r| make(r, "git-folder-symbolic")).collect())];
+    let mut sections =
+        vec![("Open".to_string(), p.workspace.open.iter().filter_map(|r| make(r, "git-folder-symbolic")).collect())];
     sections.push((
         "Favorites".into(),
         p.workspace.repositories.iter().filter(|r| r.favorite).filter_map(|r| make(&r.root, "git-star-symbolic")).collect(),

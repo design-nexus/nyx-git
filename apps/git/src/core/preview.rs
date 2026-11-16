@@ -85,7 +85,8 @@ fn published(root: &Path, tip: &str, ids: &HashSet<String>) -> Result<usize> {
     if ids.is_empty() {
         return Ok(0);
     }
-    let unpublished: HashSet<String> = lines(git(root, "Check published commits", &["rev-list", tip, "--not", "--remotes"])?).into_iter().collect();
+    let unpublished: HashSet<String> =
+        lines(git(root, "Check published commits", &["rev-list", tip, "--not", "--remotes"])?).into_iter().collect();
     Ok(ids.iter().filter(|id| !unpublished.contains(*id)).count())
 }
 fn changed_files(root: &Path, from: &str, to: &str) -> Result<HashSet<PathBuf>> {
@@ -102,7 +103,8 @@ fn overlap(root: &Path, ours: &str, theirs: &str) -> Vec<PathBuf> {
     both
 }
 fn ancestor(root: &Path, a: &str, b: &str) -> bool {
-    operations::invoke(root, "Check ancestry", ["merge-base", "--is-ancestor", a, b].map(OsString::from).into(), None, &[], false).is_ok()
+    operations::invoke(root, "Check ancestry", ["merge-base", "--is-ancestor", a, b].map(OsString::from).into(), None, &[], false)
+        .is_ok()
 }
 fn dirty(root: &Path) -> Result<Vec<status::FileStatus>> {
     Ok(status::parse(&operations::run(root, Operation::Status)?)?.files)
@@ -113,7 +115,8 @@ fn short(id: &str) -> String {
 fn branch_name(branch: &Option<String>) -> String {
     branch.as_deref().map_or("HEAD (detached)".into(), |b| b.trim_start_matches("refs/heads/").to_string())
 }
-const RECOVERY_POINT: &str = "Nyx Git saves a recovery point at the current tip first (Activity or Recovery points can make a branch from it).";
+const RECOVERY_POINT: &str =
+    "Nyx Git saves a recovery point at the current tip first (Activity or Recovery points can make a branch from it).";
 const REFLOG: &str = "Git's reflog also remembers where HEAD was.";
 
 pub fn preview(root: &Path, subject: &Subject) -> Result<Preview> {
@@ -150,7 +153,8 @@ pub fn preview(root: &Path, subject: &Subject) -> Result<Preview> {
             (p.commits, p.commits_total) = (list, total);
             p.commits_note = "are replayed with new hashes".into();
             p.overlap = overlap(root, "HEAD", onto);
-            p.recovery = vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
+            p.recovery =
+                vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
         }
         Subject::Advanced(Action::Interactive { base, .. } | Action::Squash { base, .. }) => {
             p.refs.push(RefMove { name: branch_name(&branch), before: tip.clone(), after: "the rewritten commits".into() });
@@ -158,7 +162,8 @@ pub fn preview(root: &Path, subject: &Subject) -> Result<Preview> {
             p.published = published(root, "HEAD", &ids)?;
             (p.commits, p.commits_total) = (list, total);
             p.commits_note = "are rewritten with new hashes".into();
-            p.recovery = vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
+            p.recovery =
+                vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
         }
         Subject::Advanced(Action::Merge(id)) => {
             let fast = tip.as_deref().is_some_and(|t| ancestor(root, t, id));
@@ -173,11 +178,16 @@ pub fn preview(root: &Path, subject: &Subject) -> Result<Preview> {
             if !fast {
                 p.overlap = overlap(root, "HEAD", id);
             }
-            p.recovery = vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
+            p.recovery =
+                vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
         }
         Subject::Advanced(Action::CherryPick { id, .. } | Action::Revert { id, .. }) => {
             let verb = if matches!(subject, Subject::Advanced(Action::CherryPick { .. })) { "copy of" } else { "commit undoing" };
-            p.refs.push(RefMove { name: branch_name(&branch), before: tip.clone(), after: format!("a new {verb} {}", short(id)) });
+            p.refs.push(RefMove {
+                name: branch_name(&branch),
+                before: tip.clone(),
+                after: format!("a new {verb} {}", short(id)),
+            });
             if let Ok(parent) = git(root, "Read parent", &["rev-parse", "--verify", &format!("{id}^")]) {
                 let parent = String::from_utf8_lossy(&parent).trim().to_string();
                 let theirs = changed_files(root, &parent, id).unwrap_or_default();
@@ -189,7 +199,8 @@ pub fn preview(root: &Path, subject: &Subject) -> Result<Preview> {
                     p.overlap = both;
                 }
             }
-            p.recovery = vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
+            p.recovery =
+                vec![RECOVERY_POINT.into(), "If it stops for conflicts, Abort returns the branch to where it was.".into()];
         }
         Subject::Advanced(Action::DeleteBranch { branch: name, expected }) => {
             p.refs.push(RefMove { name: name.clone(), before: Some(expected.clone()), after: "deleted".into() });
@@ -220,7 +231,11 @@ pub fn preview(root: &Path, subject: &Subject) -> Result<Preview> {
             p.recovery = vec!["Nyx Git saves a recovery point at the tag's object first.".into()];
         }
         Subject::Advanced(Action::ForcePush { remote, branch: name, lease }) => {
-            p.refs.push(RefMove { name: format!("{remote}/{name}"), before: Some(lease.clone()), after: tip.as_deref().map(short).unwrap_or_default() });
+            p.refs.push(RefMove {
+                name: format!("{remote}/{name}"),
+                before: Some(lease.clone()),
+                after: tip.as_deref().map(short).unwrap_or_default(),
+            });
             let (list, total, _) = commits(root, &[lease, "--not", "HEAD"])?;
             (p.commits, p.commits_total) = (list, total);
             p.commits_note = format!("leave {remote}/{name} on the server");
@@ -242,14 +257,22 @@ pub fn preview(root: &Path, subject: &Subject) -> Result<Preview> {
         }
         Subject::Advanced(Action::Abort) => {
             let files = dirty(root)?;
-            p.refs.push(RefMove { name: branch_name(&branch), before: tip.clone(), after: "where it was before the operation".into() });
+            p.refs.push(RefMove {
+                name: branch_name(&branch),
+                before: tip.clone(),
+                after: "where it was before the operation".into(),
+            });
             p.at_risk = files.iter().map(|f| f.path.clone()).collect();
             p.risk_note = "Resolutions and edits made during the operation may be lost.".into();
             p.irreversible = !p.at_risk.is_empty();
             p.recovery = vec![RECOVERY_POINT.into()];
         }
         Subject::Advanced(Action::Continue) => {
-            p.refs.push(RefMove { name: branch_name(&branch), before: tip.clone(), after: "the next commit of the operation".into() });
+            p.refs.push(RefMove {
+                name: branch_name(&branch),
+                before: tip.clone(),
+                after: "the next commit of the operation".into(),
+            });
             p.recovery = vec![RECOVERY_POINT.into()];
         }
         Subject::Advanced(Action::Checkout(id)) => {

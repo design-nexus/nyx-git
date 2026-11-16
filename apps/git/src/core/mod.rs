@@ -1,6 +1,6 @@
 pub mod activity;
-pub mod agents;
 pub mod advanced;
+pub mod agents;
 pub mod conflicts;
 pub mod file_history;
 pub mod files;

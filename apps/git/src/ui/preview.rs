@@ -55,7 +55,15 @@ pub fn show(title: &str, effects: &str, action: &str, destructive: bool, p: &Pre
         }
     }
     if p.commits_total > 0 {
-        section(&body, &format!("{} COMMIT{} {}", p.commits_total, if p.commits_total == 1 { "" } else { "S" }, p.commits_note.to_uppercase()));
+        section(
+            &body,
+            &format!(
+                "{} COMMIT{} {}",
+                p.commits_total,
+                if p.commits_total == 1 { "" } else { "S" },
+                p.commits_note.to_uppercase()
+            ),
+        );
         for (id, subject) in p.commits.iter().take(8) {
             line(&body, &format!("{} {subject}", short(id)), "dim-label");
         }

@@ -90,7 +90,10 @@ pub fn open(root: PathBuf, file: PathBuf) {
     {
         let (detail, copy) = (detail.clone(), copy.clone());
         selection.connect_selected_item_notify(move |s| {
-            let line = s.selected_item().and_downcast::<glib::BoxedAnyObject>().map(|o| o.borrow::<(usize, BlameLine, bool)>().1.clone());
+            let line = s
+                .selected_item()
+                .and_downcast::<glib::BoxedAnyObject>()
+                .map(|o| o.borrow::<(usize, BlameLine, bool)>().1.clone());
             match line {
                 Some(line) if !line.uncommitted() => {
                     detail.set_text(&format!("{} {} · {}", &line.commit[..10], line.summary, line.author));
@@ -107,8 +110,10 @@ pub fn open(root: PathBuf, file: PathBuf) {
     {
         let selection = selection.clone();
         copy.connect_clicked(move |b| {
-            if let Some(line) =
-                selection.selected_item().and_downcast::<glib::BoxedAnyObject>().map(|o| o.borrow::<(usize, BlameLine, bool)>().1.clone())
+            if let Some(line) = selection
+                .selected_item()
+                .and_downcast::<glib::BoxedAnyObject>()
+                .map(|o| o.borrow::<(usize, BlameLine, bool)>().1.clone())
             {
                 b.display().clipboard().set_text(&line.commit);
             }

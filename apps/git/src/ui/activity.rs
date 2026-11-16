@@ -71,16 +71,20 @@ impl Activity {
         let toolbar = super::pagebar::PageBar::new();
         let source = Rc::new(Cell::new(0u8));
         let s = source.clone();
-        let sources = widgets::segmented(&widgets::opts(&[("all", "All"), ("journal", "Nyx Git"), ("reflog", "Git reflog")]), "all", move |id| {
-            s.set(match id.as_str() {
-                "journal" => 1,
-                "reflog" => 2,
-                _ => 0,
-            });
-            if let Some(ui) = current() {
-                ui.destinations.activity.refilter();
-            }
-        });
+        let sources = widgets::segmented(
+            &widgets::opts(&[("all", "All"), ("journal", "Nyx Git"), ("reflog", "Git reflog")]),
+            "all",
+            move |id| {
+                s.set(match id.as_str() {
+                    "journal" => 1,
+                    "reflog" => 2,
+                    _ => 0,
+                });
+                if let Some(ui) = current() {
+                    ui.destinations.activity.refilter();
+                }
+            },
+        );
         sources.add_css_class("git-segments");
         sources.set_tooltip_text(Some("Nyx Git: operations it ran and recorded. Git reflog: HEAD's moves, by any Git tool."));
         toolbar.start(&sources);
@@ -158,7 +162,12 @@ impl Activity {
                 tag.remove_css_class("acc");
             }
             let time = tag.next_sibling().and_downcast::<gtk::Label>().unwrap();
-            time.set_text(&glib::DateTime::from_unix_local(e.time).and_then(|d| d.format("%H:%M")).map(|s| s.to_string()).unwrap_or_default());
+            time.set_text(
+                &glib::DateTime::from_unix_local(e.time)
+                    .and_then(|d| d.format("%H:%M"))
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+            );
             time.set_tooltip_text(Some(&format!("{} · {}", when(e.time), super::graph_renderer::ago(e.time))));
         });
         let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
@@ -267,7 +276,9 @@ impl Activity {
     /// Read the activity of the open repository; `force` reads it again even if shown.
     pub fn load(&self, force: bool) {
         let Some(ui) = current() else { return };
-        let Some((root, common)) = ui.snapshot.borrow().as_ref().map(|s| (s.repository.root.clone(), s.repository.common_dir.clone())) else {
+        let Some((root, common)) =
+            ui.snapshot.borrow().as_ref().map(|s| (s.repository.root.clone(), s.repository.common_dir.clone()))
+        else {
             self.store.remove_all();
             self.readout.set_text("Open a repository to see its activity.");
             return;
@@ -345,7 +356,9 @@ impl Activity {
         }
         insp.note(match e.source {
             Source::Journal => "Recorded by Nyx Git when it ran this, with every reference it moved.",
-            Source::Reflog => "From Git's reflog: HEAD moved here. Any Git tool may have done it; Nyx Git knows only what the reflog says.",
+            Source::Reflog => {
+                "From Git's reflog: HEAD moved here. Any Git tool may have done it; Nyx Git knows only what the reflog says."
+            }
         });
         if !e.changes.is_empty() {
             insp.group("References");

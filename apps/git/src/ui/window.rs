@@ -233,7 +233,12 @@ pub fn present(app: &gtk::Application) -> Rc<Ui> {
     let bar = super::pagebar::PageBar::new();
     bar.start(&super::pagebar::segments(&workflow.category, &["All", "Unstaged", "Staged"]));
     bar.start(&super::pagebar::search(&search, "Filter changed files", "Ctrl F", 18));
-    bar.end(&super::pagebar::action("git-stash-symbolic", "Stash…", "Save, apply and drop stashes", super::repository_actions::stashes));
+    bar.end(&super::pagebar::action(
+        "git-stash-symbolic",
+        "Stash…",
+        "Save, apply and drop stashes",
+        super::repository_actions::stashes,
+    ));
     let left = widgets::vbox(0);
     left.add_css_class("git-files-col");
     left.append(&pages);
@@ -893,7 +898,8 @@ impl Ui {
     /// A problem: its first line, with Details for all of what Git said.
     pub fn error(self: &Rc<Self>, message: &str) {
         let first = message.lines().next().unwrap_or(message).trim();
-        let short: String = if first.chars().count() > 96 { format!("{}…", first.chars().take(94).collect::<String>()) } else { first.into() };
+        let short: String =
+            if first.chars().count() > 96 { format!("{}…", first.chars().take(94).collect::<String>()) } else { first.into() };
         let full = message.to_string();
         nyx_ui::toast::show_action(&self.overlay, &short, "Details", move || show_details(&full));
         let mut child = self.overlay.first_child();

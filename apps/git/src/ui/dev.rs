@@ -27,7 +27,9 @@ pub fn after_apply(ui: &super::window::Ui) {
         {
             let base = base.to_string_lossy().into_owned();
             gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(800), move || {
-                match nyx_git::core::advanced::resolve_target(&root, &base).and_then(|b| nyx_git::core::advanced::plan(&root, &b).map(|s| (b, s))) {
+                match nyx_git::core::advanced::resolve_target(&root, &base)
+                    .and_then(|b| nyx_git::core::advanced::plan(&root, &b).map(|s| (b, s)))
+                {
                     Ok((base, mut steps)) => {
                         if let Some(s) = steps.get_mut(1) {
                             s.action = nyx_git::core::advanced::Pick::Squash;

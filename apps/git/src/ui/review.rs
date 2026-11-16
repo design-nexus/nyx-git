@@ -4,8 +4,7 @@
 use super::window::current;
 use gtk::prelude::*;
 use nyx_git::providers::{
-    Account, Client, Repository, Request,
-    credentials,
+    Account, Client, Repository, Request, credentials,
     review::{self, Check, CheckState, FileChange, MergeMethod, RequestCommit, Review as Approval},
 };
 use nyx_ui::widgets;
@@ -69,11 +68,14 @@ impl ReviewPage {
         let heading = widgets::label("", "git-bar-note");
         heading.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         bar.end(&heading);
-        let create = super::pagebar::action("git-plus-symbolic", "New request…", "Open a pull or merge request from a branch", || page(|p| {
-            if let Some(d) = p.data.borrow().as_ref() {
-                super::providers::new_request(d.account.clone(), d.repo.clone());
-            }
-        }));
+        let create =
+            super::pagebar::action("git-plus-symbolic", "New request…", "Open a pull or merge request from a branch", || {
+                page(|p| {
+                    if let Some(d) = p.data.borrow().as_ref() {
+                        super::providers::new_request(d.account.clone(), d.repo.clone());
+                    }
+                })
+            });
         create.add_css_class("git-bordered");
         bar.end(&create);
         let accounts = widgets::bar_button("git-users-symbolic", "Hosting accounts…");
@@ -231,7 +233,15 @@ impl ReviewPage {
         }
         if data.requests.is_empty() {
             *self.data.borrow_mut() = Some(data);
-            self.show_empty("No requests", if self.all.get() { "This repository has no pull or merge requests." } else { "No open pull or merge requests. Choose All to see closed and merged ones." }, false);
+            self.show_empty(
+                "No requests",
+                if self.all.get() {
+                    "This repository has no pull or merge requests."
+                } else {
+                    "No open pull or merge requests. Choose All to see closed and merged ones."
+                },
+                false,
+            );
             self.publish_links();
             return;
         }
@@ -256,12 +266,15 @@ impl ReviewPage {
             route.append(&way);
             b.append(&route);
             let chips = widgets::hbox(6);
-            chips.append(&pill(&badge(*state), match state {
-                Some(CheckState::Failure) => "bad",
-                Some(CheckState::Pending) => "warn",
-                Some(_) => "ok",
-                None => "",
-            }));
+            chips.append(&pill(
+                &badge(*state),
+                match state {
+                    Some(CheckState::Failure) => "bad",
+                    Some(CheckState::Pending) => "warn",
+                    Some(_) => "ok",
+                    None => "",
+                },
+            ));
             if r.draft {
                 chips.append(&pill("draft", ""));
             }
@@ -322,7 +335,16 @@ impl ReviewPage {
                 let mut errors = Vec::new();
                 let c = match client(&account) {
                     Ok(c) => c,
-                    Err(e) => return Details { number: n, checks: vec![], files: vec![], commits: vec![], reviews: vec![], errors: vec![format!("{e:#}")] },
+                    Err(e) => {
+                        return Details {
+                            number: n,
+                            checks: vec![],
+                            files: vec![],
+                            commits: vec![],
+                            reviews: vec![],
+                            errors: vec![format!("{e:#}")],
+                        };
+                    }
                 };
                 fn take<T>(errors: &mut Vec<String>, what: &str, r: anyhow::Result<Vec<T>>) -> Vec<T> {
                     r.unwrap_or_else(|e| {
@@ -330,7 +352,11 @@ impl ReviewPage {
                         Vec::new()
                     })
                 }
-                let checks = if request.head.is_empty() { Vec::new() } else { take(&mut errors, "Checks", c.checks(&repo, &request.head)) };
+                let checks = if request.head.is_empty() {
+                    Vec::new()
+                } else {
+                    take(&mut errors, "Checks", c.checks(&repo, &request.head))
+                };
                 let files = take(&mut errors, "Files", c.request_files(&repo, n));
                 let commits = take(&mut errors, "Commits", c.request_commits(&repo, n));
                 let reviews = take(&mut errors, "Reviews", c.reviews(&repo, n));
@@ -410,7 +436,11 @@ impl ReviewPage {
                 if *tip == r.head {
                     insp.kv("Tip", "Same commit as the request", "ok");
                 } else {
-                    insp.kv("Tip", &format!("{} here, {} in the request", &tip[..tip.len().min(7)], &r.head[..r.head.len().min(7)]), "warn");
+                    insp.kv(
+                        "Tip",
+                        &format!("{} here, {} in the request", &tip[..tip.len().min(7)], &r.head[..r.head.len().min(7)]),
+                        "warn",
+                    );
                 }
             }
             None => {
@@ -437,11 +467,21 @@ impl ReviewPage {
         }
         insp.group("Reviews");
         if d.reviews.is_empty() {
-            insp.note(if account.kind == nyx_git::providers::Kind::Gitlab { "No approvals yet. Discussions are on the web." } else { "No reviews yet." });
+            insp.note(if account.kind == nyx_git::providers::Kind::Gitlab {
+                "No approvals yet. Discussions are on the web."
+            } else {
+                "No reviews yet."
+            });
         }
         for rv in &d.reviews {
             let state = rv.state.to_lowercase().replace('_', " ");
-            let tone = if state.contains("approv") { "ok" } else if state.contains("change") { "warn" } else { "" };
+            let tone = if state.contains("approv") {
+                "ok"
+            } else if state.contains("change") {
+                "warn"
+            } else {
+                ""
+            };
             insp.kv(&rv.author, &state, tone);
             if !rv.body.is_empty() {
                 insp.note(&rv.body);
@@ -536,7 +576,10 @@ fn merge_dialog(account: Account, repo: Repository, request: Request, failing: b
             })
         }));
     } else {
-        card.append(&widgets::label(&format!("{} merges with the method set for the project.", account.kind.name()), "dim-label"));
+        card.append(&widgets::label(
+            &format!("{} merges with the method set for the project.", account.kind.name()),
+            "dim-label",
+        ));
     }
     let row = widgets::hbox(8);
     row.set_halign(gtk::Align::End);

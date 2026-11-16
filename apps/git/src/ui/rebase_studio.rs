@@ -78,12 +78,19 @@ impl RebaseStudio {
             "Oldest first. Squash and fixup join the commit above; edit and split stop so you can change or divide a commit, then Continue.",
         ));
         bar.end(&hint);
-        let reset = super::pagebar::action("git-undo-symbolic", "Reset plan", "Back to every commit picked in its original order", || studio(|s| {
-            if let Some(p) = s.state.borrow_mut().as_mut() {
-                p.steps = p.original.clone();
-            }
-            s.render();
-        }));
+        let reset = super::pagebar::action(
+            "git-undo-symbolic",
+            "Reset plan",
+            "Back to every commit picked in its original order",
+            || {
+                studio(|s| {
+                    if let Some(p) = s.state.borrow_mut().as_mut() {
+                        p.steps = p.original.clone();
+                    }
+                    s.render();
+                })
+            },
+        );
         bar.end(&reset);
         let start = gtk::Button::with_label("Review and start…");
         start.add_css_class("suggested-action");
@@ -149,7 +156,12 @@ impl RebaseStudio {
         }
         let state = self.state.borrow();
         let Some(p) = state.as_ref() else { return };
-        self.title.set_text(&format!("Rebase {} onto {} · {} commits", p.facts.branch, &p.base[..p.base.len().min(7)], p.steps.len()));
+        self.title.set_text(&format!(
+            "Rebase {} onto {} · {} commits",
+            p.facts.branch,
+            &p.base[..p.base.len().min(7)],
+            p.steps.len()
+        ));
         for (i, step) in p.steps.iter().enumerate() {
             let row = gtk::ListBoxRow::new();
             row.set_activatable(false);
@@ -186,7 +198,9 @@ impl RebaseStudio {
                 glib::idle_add_local_once(move || studio(|s| s.set_action(i, action)));
             });
             line.append(&picker);
-            for (icon, tip, delta) in [("git-chev-u-symbolic", "Move up (Alt+Up)", -1i32), ("git-chev-d-symbolic", "Move down (Alt+Down)", 1)] {
+            for (icon, tip, delta) in
+                [("git-chev-u-symbolic", "Move up (Alt+Up)", -1i32), ("git-chev-d-symbolic", "Move down (Alt+Down)", 1)]
+            {
                 let b = widgets::icon_button(icon, tip);
                 let to = i as i32 + delta;
                 b.set_sensitive(to >= 0 && (to as usize) < p.steps.len());
@@ -264,7 +278,15 @@ impl RebaseStudio {
         };
         let proposed = advanced::proposed(&p.steps);
         add("Proposed history", "git-insp-title");
-        add(&format!("Oldest first · {} commit{} from {}", proposed.len(), if proposed.len() == 1 { "" } else { "s" }, p.original.len()), "git-insp-sub");
+        add(
+            &format!(
+                "Oldest first · {} commit{} from {}",
+                proposed.len(),
+                if proposed.len() == 1 { "" } else { "s" },
+                p.original.len()
+            ),
+            "git-insp-sub",
+        );
         for c in &proposed {
             let folded = if c.ids.len() > 1 { format!(" (+{} folded in)", c.ids.len() - 1) } else { String::new() };
             let mark = match c.action {
@@ -282,7 +304,16 @@ impl RebaseStudio {
         let reordered = p.steps.iter().map(|s| &s.id).ne(p.original.iter().map(|s| &s.id));
         let changed = reordered || p.steps.iter().any(|s| s.action != Pick::Pick);
         add("ORIGINAL", "git-insp-group");
-        add(&format!("{} commits on {}, oldest {} … newest {}", p.original.len(), p.facts.branch, &p.original[0].id[..8], &p.original[p.original.len() - 1].id[..8]), "git-insp-note");
+        add(
+            &format!(
+                "{} commits on {}, oldest {} … newest {}",
+                p.original.len(),
+                p.facts.branch,
+                &p.original[0].id[..8],
+                &p.original[p.original.len() - 1].id[..8]
+            ),
+            "git-insp-note",
+        );
         let published = p.steps.iter().filter(|s| p.facts.published.contains(&s.id)).count();
         if published > 0 {
             self.preview.append(&widgets::banner(
@@ -307,7 +338,10 @@ impl RebaseStudio {
             add(&format!("{} point into this range and stay on the old commits.", names.join(", ")), "git-insp-note");
         }
         add("RECOVERY", "git-insp-group");
-        add("Nyx Git saves a recovery point at the current tip first. Abort during the rebase returns the branch to where it was.", "git-insp-note");
+        add(
+            "Nyx Git saves a recovery point at the current tip first. Abort during the rebase returns the branch to where it was.",
+            "git-insp-note",
+        );
         if !changed {
             add("The plan matches the original history; there's nothing to rebase yet.", "git-insp-note");
         }
@@ -327,7 +361,9 @@ impl RebaseStudio {
             }
             return;
         }
-        if let Some(s) = p.steps.iter().find(|s| s.action == Pick::Reword && s.message.as_ref().is_none_or(|m| m.trim().is_empty())) {
+        if let Some(s) =
+            p.steps.iter().find(|s| s.action == Pick::Reword && s.message.as_ref().is_none_or(|m| m.trim().is_empty()))
+        {
             if let Some(ui) = current() {
                 ui.toast(&format!("Enter a message for {} first.", &s.id[..8]));
             }

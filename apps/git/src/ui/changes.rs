@@ -196,9 +196,11 @@ pub fn header_factory() -> gtk::SignalListItemFactory {
             let Some(header) = h.upgrade() else { return };
             let Some(ui) = current() else { return };
             let Some(model) = ui.selection.model() else { return };
-            let group: Vec<Entry> = (header.start()..header.end()).filter_map(|i| model.item(i)).filter_map(|o| entry_of(&o)).collect();
+            let group: Vec<Entry> =
+                (header.start()..header.end()).filter_map(|i| model.item(i)).filter_map(|o| entry_of(&o)).collect();
             let Some(first) = group.first() else { return };
-            let paths: Vec<_> = group.iter().flat_map(|e| std::iter::once(e.file.path.clone()).chain(e.file.original.clone())).collect();
+            let paths: Vec<_> =
+                group.iter().flat_map(|e| std::iter::once(e.file.path.clone()).chain(e.file.original.clone())).collect();
             match first.group {
                 Group::Conflicts => super::conflict_studio_show(None),
                 Group::Staged => {

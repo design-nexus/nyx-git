@@ -279,20 +279,26 @@ impl Sidebar {
                             dot(Some(path), None),
                         )
                     }
-                    Action::Reference { current: is_current, .. } if *kind == Kind::Local => (
-                        "git-branch-symbolic",
-                        item.name.clone(),
-                        track(item.track),
-                        *is_current,
-                        dot(None, Some(&item.name)),
-                    ),
+                    Action::Reference { current: is_current, .. } if *kind == Kind::Local => {
+                        ("git-branch-symbolic", item.name.clone(), track(item.track), *is_current, dot(None, Some(&item.name)))
+                    }
                     Action::Reference { .. } => ("git-tag-symbolic", item.name.clone(), String::new(), false, None),
-                    Action::Stash(_) => ("git-stash-symbolic", item.detail.lines().next().unwrap_or(&item.name).to_string(), String::new(), false, None),
+                    Action::Stash(_) => (
+                        "git-stash-symbolic",
+                        item.detail.lines().next().unwrap_or(&item.name).to_string(),
+                        String::new(),
+                        false,
+                        None,
+                    ),
                     Action::Remote(_) => ("git-remote-symbolic", item.name.clone(), String::new(), false, None),
                 };
                 let tip = format!(
                     "{}\n{}{}\nRight-click or Shift+F10 for actions",
-                    if matches!(item.action, Action::Worktree(_)) { format!("{name} · {}", item.name) } else { item.name.clone() },
+                    if matches!(item.action, Action::Worktree(_)) {
+                        format!("{name} · {}", item.name)
+                    } else {
+                        item.name.clone()
+                    },
                     item.detail.lines().filter(|l| !l.is_empty() && *l != item.name).collect::<Vec<_>>().join("\n"),
                     mark.as_ref().map(|(_, m)| format!("\n{m}")).unwrap_or_default()
                 );

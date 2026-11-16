@@ -368,7 +368,9 @@ fn journaled(root: &Path, operation: Operation) -> Result<Vec<u8>> {
     // Discarding and worktree changes move no references but are worth remembering.
     let always = match &operation {
         Operation::Worktree(_) => true,
-        Operation::Advanced { action, .. } => matches!(**action, super::advanced::Action::Discard { .. } | super::advanced::Action::Abort),
+        Operation::Advanced { action, .. } => {
+            matches!(**action, super::advanced::Action::Discard { .. } | super::advanced::Action::Abort)
+        }
         _ => false,
     };
     let label = operation.label();
@@ -438,7 +440,8 @@ pub fn hint(message: &str, pull: bool) -> Option<&'static str> {
     let m = message.to_lowercase();
     if m.contains("has no upstream branch") || m.contains("no tracking information") {
         Some("Publish the branch with Push to choose a remote and set its upstream.")
-    } else if pull && (m.contains("not possible to fast-forward") || m.contains("diverging branches") || m.contains("divergent")) {
+    } else if pull && (m.contains("not possible to fast-forward") || m.contains("diverging branches") || m.contains("divergent"))
+    {
         Some("Pull only fast-forwards. Merge or rebase onto the upstream from the commit's Git actions.")
     } else if m.contains("[rejected]") || m.contains("non-fast-forward") || m.contains("fetch first") {
         Some("The remote has commits you don't have. Fetch and pull (or merge) first, then push again.")
@@ -448,8 +451,14 @@ pub fn hint(message: &str, pull: bool) -> Option<&'static str> {
         || m.contains("terminal prompts disabled")
         || m.contains("host key verification failed")
     {
-        Some("Git couldn't sign in. Nyx uses your system credentials: load your key into the SSH agent or set up a Git credential helper.")
-    } else if m.contains("could not resolve host") || m.contains("unable to access") || m.contains("connection timed out") || m.contains("network is unreachable") {
+        Some(
+            "Git couldn't sign in. Nyx uses your system credentials: load your key into the SSH agent or set up a Git credential helper.",
+        )
+    } else if m.contains("could not resolve host")
+        || m.contains("unable to access")
+        || m.contains("connection timed out")
+        || m.contains("network is unreachable")
+    {
         Some("The remote couldn't be reached. Check the network and the remote's URL.")
     } else {
         None

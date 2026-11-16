@@ -1,11 +1,7 @@
 //! Pane sizes kept across sessions, by name (`flow.inspector`, `review.list`, …).
 use crate::prefs;
 use gtk::{glib, prelude::*};
-use std::{
-    cell::Cell,
-    rc::Rc,
-    time::Duration,
-};
+use std::{cell::Cell, rc::Rc, time::Duration};
 
 /// Keep `paned`'s divider where the reader leaves it. With `end`, the size of the end
 /// child is kept (an inspector), so resizing the window doesn't move it.

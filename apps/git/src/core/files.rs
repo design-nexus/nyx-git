@@ -10,7 +10,14 @@ use std::{
 
 /// Tracked paths in the index, at most `limit`, as raw Linux path bytes.
 pub fn tracked(root: &Path, limit: usize) -> Result<Vec<PathBuf>> {
-    let bytes = operations::invoke(root, "List tracked files", ["ls-files", "-z", "--cached"].map(OsString::from).into(), None, &[], false)?;
+    let bytes = operations::invoke(
+        root,
+        "List tracked files",
+        ["ls-files", "-z", "--cached"].map(OsString::from).into(),
+        None,
+        &[],
+        false,
+    )?;
     Ok(bytes.split(|b| *b == 0).filter(|p| !p.is_empty()).take(limit).map(|p| PathBuf::from(OsStr::from_bytes(p))).collect())
 }
 

@@ -67,9 +67,8 @@ fn git(root: &Path, label: &str, args: &[&str]) -> Result<Vec<u8>> {
 }
 /// "ahead 2, behind 1" (`%(upstream:track,nobracket)`) as (2, 1); "gone" or nothing as (0, 0).
 fn track(text: &str) -> (usize, usize) {
-    let count = |word: &str| {
-        text.split(", ").find_map(|part| part.strip_prefix(word)).and_then(|n| n.trim().parse().ok()).unwrap_or(0)
-    };
+    let count =
+        |word: &str| text.split(", ").find_map(|part| part.strip_prefix(word)).and_then(|n| n.trim().parse().ok()).unwrap_or(0);
     (count("ahead "), count("behind "))
 }
 pub fn read(root: &Path) -> Result<Inventory> {

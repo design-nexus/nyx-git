@@ -97,9 +97,12 @@ impl State {
         self.query.is_empty() || self.title(id).to_lowercase().contains(&self.query)
     }
     fn hit(&self, wx: f64, wy: f64) -> Option<String> {
-        self.nodes.iter().rev().map(|(id, _)| id).find(|id| {
-            self.place(id).is_some_and(|p| wx >= p.x && wx <= p.x + CARD_W && wy >= p.y && wy <= p.y + CARD_H)
-        }).cloned()
+        self.nodes
+            .iter()
+            .rev()
+            .map(|(id, _)| id)
+            .find(|id| self.place(id).is_some_and(|p| wx >= p.x && wx <= p.x + CARD_W && wy >= p.y && wy <= p.y + CARD_H))
+            .cloned()
     }
 }
 pub struct FlowPage {
@@ -132,7 +135,12 @@ fn rgba(c: &str) -> gdk::RGBA {
     gdk::RGBA::parse(c).unwrap_or(gdk::RGBA::BLACK)
 }
 fn mix(a: &gdk::RGBA, b: &gdk::RGBA, t: f32) -> gdk::RGBA {
-    gdk::RGBA::new(a.red() * (1.0 - t) + b.red() * t, a.green() * (1.0 - t) + b.green() * t, a.blue() * (1.0 - t) + b.blue() * t, 1.0)
+    gdk::RGBA::new(
+        a.red() * (1.0 - t) + b.red() * t,
+        a.green() * (1.0 - t) + b.green() * t,
+        a.blue() * (1.0 - t) + b.blue() * t,
+        1.0,
+    )
 }
 fn set(cr: &cairo::Context, c: &gdk::RGBA, alpha: f64) {
     cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, alpha);
@@ -146,7 +154,15 @@ fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
     cr.close_path();
 }
 /// `at` is (x, y, width); `font` is (size, bold).
-fn text(area: &gtk::DrawingArea, cr: &cairo::Context, value: &str, at: (f64, f64, f64), font: (f64, bool), c: &gdk::RGBA, alpha: f64) {
+fn text(
+    area: &gtk::DrawingArea,
+    cr: &cairo::Context,
+    value: &str,
+    at: (f64, f64, f64),
+    font: (f64, bool),
+    c: &gdk::RGBA,
+    alpha: f64,
+) {
     let ((x, y, width), (size, bold)) = (at, font);
     if width < 8.0 {
         return;
@@ -273,10 +289,12 @@ impl FlowPage {
         auto.connect_clicked(|_| page(|p| p.auto_layout()));
         toolbar.end(&auto);
         let fit = widgets::bar_button("git-fit-symbolic", "Fit everything (0)");
-        fit.connect_clicked(|_| page(|p| {
-            p.moved.set(false);
-            p.fit();
-        }));
+        fit.connect_clicked(|_| {
+            page(|p| {
+                p.moved.set(false);
+                p.fit();
+            })
+        });
         toolbar.end(&fit);
         let refresh = widgets::bar_button("git-refresh-symbolic", "Read the work in progress again");
         refresh.connect_clicked(|_| page(|p| p.load(true)));
@@ -307,7 +325,9 @@ impl FlowPage {
         canvas.set_accessible_role(gtk::AccessibleRole::Group);
         canvas.update_property(&[
             gtk::accessible::Property::Label("Flow canvas"),
-            gtk::accessible::Property::Description("Arrow keys move between cards, Enter opens, Shift+F10 shows actions, plus and minus zoom, 0 fits."),
+            gtk::accessible::Property::Description(
+                "Arrow keys move between cards, Enter opens, Shift+F10 shows actions, plus and minus zoom, 0 fits.",
+            ),
         ]);
         let inspector = super::inspector::Inspector::new();
         let inspector_scroll = gtk::ScrolledWindow::builder()
@@ -416,7 +436,10 @@ impl FlowPage {
                         p.camera.set(Camera { x: camera.x - dx / cam.zoom, y: camera.y - dy / cam.zoom, ..cam })
                     }
                     Some(Drag::Card { id, from }) if dx.abs() + dy.abs() > 4.0 => {
-                        p.state.borrow_mut().manual.insert(id.clone(), Place { x: from.x + dx / cam.zoom, y: from.y + dy / cam.zoom });
+                        p.state
+                            .borrow_mut()
+                            .manual
+                            .insert(id.clone(), Place { x: from.x + dx / cam.zoom, y: from.y + dy / cam.zoom });
                     }
                     _ => {}
                 }
@@ -445,7 +468,12 @@ impl FlowPage {
                 if g.current_button() == 3
                     && let Some(id) = hit.clone()
                 {
-                    super::popup_at(&p.canvas, actions(&id).into_iter().map(|(l, f)| super::item(&l, move || f())).collect(), x, y);
+                    super::popup_at(
+                        &p.canvas,
+                        actions(&id).into_iter().map(|(l, f)| super::item(&l, move || f())).collect(),
+                        x,
+                        y,
+                    );
                 } else if n == 2
                     && let Some(id) = hit
                 {
@@ -590,7 +618,11 @@ impl FlowPage {
     /// Move the selection to the nearest card in a direction.
     fn step(&self, dx: f64, dy: f64) {
         let s = self.state.borrow();
-        let Some(from) = s.selected.as_ref().and_then(|id| s.place(id)).or_else(|| s.nodes.first().and_then(|(id, _)| s.place(id))) else { return };
+        let Some(from) =
+            s.selected.as_ref().and_then(|id| s.place(id)).or_else(|| s.nodes.first().and_then(|(id, _)| s.place(id)))
+        else {
+            return;
+        };
         let best = s
             .nodes
             .iter()
@@ -640,7 +672,9 @@ impl FlowPage {
     /// The open repository changed or was shown: read its flow, at most every few seconds.
     pub fn load(&self, force: bool) {
         let Some(ui) = current() else { return };
-        let Some((root, common)) = ui.snapshot.borrow().as_ref().map(|s| (s.repository.root.clone(), s.repository.common_dir.clone())) else {
+        let Some((root, common)) =
+            ui.snapshot.borrow().as_ref().map(|s| (s.repository.root.clone(), s.repository.common_dir.clone()))
+        else {
             *self.state.borrow_mut() = State::default();
             self.rebuild_list();
             self.readout.set_text("Open a repository to see its work in progress.");
@@ -655,10 +689,12 @@ impl FlowPage {
         if same && self.last.get().is_some_and(|t| t.elapsed() < Duration::from_secs(2)) {
             // A burst of file changes: read once, a little later.
             if !self.pending.replace(true) {
-                glib::timeout_add_local_once(Duration::from_secs(2), || page(|p| {
-                    p.pending.set(false);
-                    p.load(true);
-                }));
+                glib::timeout_add_local_once(Duration::from_secs(2), || {
+                    page(|p| {
+                        p.pending.set(false);
+                        p.load(true);
+                    })
+                });
             }
             return;
         }
@@ -742,11 +778,14 @@ impl FlowPage {
     fn save_positions(&self) {
         let Some(common) = self.common.borrow().clone() else { return };
         let manual = self.state.borrow().manual.clone();
-        nyx_core::cmd::background(move || flow::save_positions(&common, &manual), |r: anyhow::Result<()>| {
-            if let Err(e) = r {
-                tracing::warn!(%e, "Could not save Flow positions");
-            }
-        });
+        nyx_core::cmd::background(
+            move || flow::save_positions(&common, &manual),
+            |r: anyhow::Result<()>| {
+                if let Err(e) = r {
+                    tracing::warn!(%e, "Could not save Flow positions");
+                }
+            },
+        );
     }
     fn rebuild_list(&self) {
         while let Some(c) = self.list.first_child() {
@@ -767,7 +806,10 @@ impl FlowPage {
                 Some(br) => {
                     let mut d = divergence(br, f.trunk.as_deref().unwrap_or("trunk"));
                     if let Some(w) = s.worktree(id) {
-                        d.push_str(&format!(" · worktree{}", w.dirty.filter(|n| *n > 0).map(|n| format!(", {n} changed")).unwrap_or_default()));
+                        d.push_str(&format!(
+                            " · worktree{}",
+                            w.dirty.filter(|n| *n > 0).map(|n| format!(", {n} changed")).unwrap_or_default()
+                        ));
                     }
                     let a = s.agents(id).len();
                     if a > 0 {
@@ -890,14 +932,18 @@ impl FlowPage {
             if let Some((from, to, what)) = proposal_for(&id, &label) {
                 let motion = gtk::EventControllerMotion::new();
                 let p = (from, to, what);
-                motion.connect_enter(move |_, _, _| page(|pg| {
-                    pg.state.borrow_mut().proposal = Some(p.clone());
-                    pg.canvas.queue_draw();
-                }));
-                motion.connect_leave(|_| page(|pg| {
-                    pg.state.borrow_mut().proposal = None;
-                    pg.canvas.queue_draw();
-                }));
+                motion.connect_enter(move |_, _, _| {
+                    page(|pg| {
+                        pg.state.borrow_mut().proposal = Some(p.clone());
+                        pg.canvas.queue_draw();
+                    })
+                });
+                motion.connect_leave(|_| {
+                    page(|pg| {
+                        pg.state.borrow_mut().proposal = None;
+                        pg.canvas.queue_draw();
+                    })
+                });
                 b.add_controller(motion);
             }
             column.append(&b);
@@ -967,44 +1013,72 @@ fn actions(id: &str) -> Vec<(String, Run)> {
     let open_here = worktree.as_ref().is_some_and(|w| w.open);
     if let Some(w) = worktree.as_ref().filter(|w| !w.open) {
         let path = w.path.clone();
-        out.push(("Open worktree".into(), Rc::new(move || if let Some(ui) = current() { ui.open(path.clone()) })));
+        out.push((
+            "Open worktree".into(),
+            Rc::new(move || {
+                if let Some(ui) = current() {
+                    ui.open(path.clone())
+                }
+            }),
+        ));
     }
     if let Some(w) = worktree.as_ref().filter(|w| w.dirty.unwrap_or(0) > 0) {
         let path = w.path.clone();
-        out.push(("Open its changes".into(), Rc::new(move || {
-            if let Some(ui) = current() {
-                if ui.root().as_ref() != Some(&path) {
-                    ui.open(path.clone());
+        out.push((
+            "Open its changes".into(),
+            Rc::new(move || {
+                if let Some(ui) = current() {
+                    if ui.root().as_ref() != Some(&path) {
+                        ui.open(path.clone());
+                    }
+                    ui.show_view("changes");
                 }
-                ui.show_view("changes");
-            }
-        })));
+            }),
+        ));
     }
     if let Some(b) = s.branch(id).cloned() {
         let reference = b.reference.clone();
-        out.push(("Show history".into(), Rc::new({
-            let id = id.to_string();
-            move || primary(&id)
-        })));
+        out.push((
+            "Show history".into(),
+            Rc::new({
+                let id = id.to_string();
+                move || primary(&id)
+            }),
+        ));
         if worktree.is_none() && !b.current {
             let (r, name) = (root.clone(), b.name.clone());
-            out.push(("Switch to this branch".into(), Rc::new(move || {
-                if let Some(ui) = current() {
-                    ui.execute_at(r.clone(), nyx_git::core::operations::Operation::SwitchBranch(name.clone()));
-                }
-            })));
+            out.push((
+                "Switch to this branch".into(),
+                Rc::new(move || {
+                    if let Some(ui) = current() {
+                        ui.execute_at(r.clone(), nyx_git::core::operations::Operation::SwitchBranch(name.clone()));
+                    }
+                }),
+            ));
             let (r, name) = (root.clone(), b.name.clone());
-            out.push(("Create a worktree for it…".into(), Rc::new(move || super::worktree_manager::create_for(r.clone(), Some(name.clone()), None))));
+            out.push((
+                "Create a worktree for it…".into(),
+                Rc::new(move || super::worktree_manager::create_for(r.clone(), Some(name.clone()), None)),
+            ));
         }
         let (r, tip) = (root.clone(), b.tip.clone());
-        out.push(("New worktree with a branch from here…".into(), Rc::new(move || super::worktree_manager::create_for(r.clone(), None, Some(tip.clone())))));
+        out.push((
+            "New worktree with a branch from here…".into(),
+            Rc::new(move || super::worktree_manager::create_for(r.clone(), None, Some(tip.clone()))),
+        ));
         let tip = b.tip.clone();
         out.push(("New branch from here…".into(), Rc::new(move || super::advanced::target_action("branch", tip.clone()))));
         if !open_here && !b.current {
             let target = reference.clone();
-            out.push(("Merge into the current branch…".into(), Rc::new(move || super::advanced::target_action("merge", target.clone()))));
+            out.push((
+                "Merge into the current branch…".into(),
+                Rc::new(move || super::advanced::target_action("merge", target.clone())),
+            ));
             let target = reference.clone();
-            out.push(("Rebase the current branch onto this…".into(), Rc::new(move || super::advanced::target_action("rebase", target.clone()))));
+            out.push((
+                "Rebase the current branch onto this…".into(),
+                Rc::new(move || super::advanced::target_action("rebase", target.clone())),
+            ));
         }
         for link in s.links.iter().filter(|l| l.source == b.name) {
             let url = link.url.clone();
@@ -1030,7 +1104,14 @@ fn actions(id: &str) -> Vec<(String, Run)> {
             })));
         }
         let name = b.name.clone();
-        out.push(("Copy branch name".into(), Rc::new(move || if let Some(ui) = current() { gtk::prelude::WidgetExt::display(&ui.window).clipboard().set_text(&name) })));
+        out.push((
+            "Copy branch name".into(),
+            Rc::new(move || {
+                if let Some(ui) = current() {
+                    gtk::prelude::WidgetExt::display(&ui.window).clipboard().set_text(&name)
+                }
+            }),
+        ));
     }
     if let Some(w) = worktree.as_ref().filter(|w| !w.main && !w.open) {
         let (r, path) = (root.clone(), w.path.clone());
@@ -1042,20 +1123,24 @@ fn actions(id: &str) -> Vec<(String, Run)> {
     }
     for a in s.agents(id) {
         let session = a.clone();
-        out.push((format!("Open {} session", a.agent()), Rc::new(move || {
-            if let Err(e) = agents::open(&session)
-                && let Some(ui) = current()
-            {
-                ui.error(&format!("Could not open the session: {e:#}"));
-            }
-        })));
+        out.push((
+            format!("Open {} session", a.agent()),
+            Rc::new(move || {
+                if let Err(e) = agents::open(&session)
+                    && let Some(ui) = current()
+                {
+                    ui.error(&format!("Could not open the session: {e:#}"));
+                }
+            }),
+        ));
     }
     out
 }
 
 fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, w: f64, h: f64, s: &State, cam: Camera) {
     let palette = nyx_theme::palette();
-    let (bg, fg, dim, accent, danger) = (rgba(&palette.bg), rgba(&palette.text), rgba(&palette.dim_text), rgba(&palette.accent), rgba(&palette.danger));
+    let (bg, fg, dim, accent, danger) =
+        (rgba(&palette.bg), rgba(&palette.text), rgba(&palette.dim_text), rgba(&palette.accent), rgba(&palette.danger));
     let tokens = nyx_theme::tokens();
     let warning = rgba(tokens.color("status.warning"));
     let success = rgba(tokens.color("status.success"));
@@ -1063,7 +1148,15 @@ fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, w: f64, h: f64, s: &State,
     set(cr, &bg, 1.0);
     let _ = cr.paint();
     let Some(f) = s.flow.as_ref() else {
-        text(area, cr, "Open a repository to see its branches, worktrees and agents.", (24.0, 24.0, w - 48.0), (13.0, false), &dim, 1.0);
+        text(
+            area,
+            cr,
+            "Open a repository to see its branches, worktrees and agents.",
+            (24.0, 24.0, w - 48.0),
+            (13.0, false),
+            &dim,
+            1.0,
+        );
         return;
     };
     // A quiet dot grid, so panning reads as movement.
@@ -1110,7 +1203,9 @@ fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, w: f64, h: f64, s: &State,
     // Requests: dashed, into their target branch.
     cr.set_dash(&[7.0, 5.0], 0.0);
     for link in &s.links {
-        let (Some(a), Some(b)) = (s.place(&flow::branch_id(&link.source)), s.place(&flow::branch_id(&link.target))) else { continue };
+        let (Some(a), Some(b)) = (s.place(&flow::branch_id(&link.source)), s.place(&flow::branch_id(&link.target))) else {
+            continue;
+        };
         let ((x0, y0), (x1, y1)) = (centre(a), centre(b));
         set(cr, &accent, 0.55);
         cr.move_to(x0, y0);
@@ -1183,11 +1278,29 @@ fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, w: f64, h: f64, s: &State,
         text(area, cr, &title, (p.x + 14.0, p.y + 10.0, CARD_W - 28.0), (13.5, true), &title_c, alpha);
         let line2 = match branch {
             Some(b) => divergence(b, trunk),
-            None => format!("detached at {}", worktree.and_then(|w| w.head.as_deref()).map(|h| &h[..h.len().min(8)]).unwrap_or("?")),
+            None => {
+                format!("detached at {}", worktree.and_then(|w| w.head.as_deref()).map(|h| &h[..h.len().min(8)]).unwrap_or("?"))
+            }
         };
-        text(area, cr, &line2, (p.x + 14.0, p.y + 31.0, CARD_W - 28.0), (11.5, false), &if branch.is_some_and(|b| b.trunk) { accent } else { dim }, alpha);
+        text(
+            area,
+            cr,
+            &line2,
+            (p.x + 14.0, p.y + 31.0, CARD_W - 28.0),
+            (11.5, false),
+            &if branch.is_some_and(|b| b.trunk) { accent } else { dim },
+            alpha,
+        );
         if let Some(b) = branch {
-            text(area, cr, &format!("{} · {}", b.subject, super::graph_renderer::relative_time(b.time)), (p.x + 14.0, p.y + 49.0, CARD_W - 28.0), (11.5, false), &fg, 0.8 * alpha);
+            text(
+                area,
+                cr,
+                &format!("{} · {}", b.subject, super::graph_renderer::relative_time(b.time)),
+                (p.x + 14.0, p.y + 49.0, CARD_W - 28.0),
+                (11.5, false),
+                &fg,
+                0.8 * alpha,
+            );
             if let Some(link) = s.links.iter().find(|l| l.source == b.name) {
                 let chip = format!("#{} {}", link.number, link.state);
                 text(area, cr, &chip, (p.x + 14.0, p.y + 66.0, CARD_W - 28.0), (11.0, false), &accent, alpha);

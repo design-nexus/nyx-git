@@ -81,7 +81,8 @@ fn text(bytes: Vec<u8>) -> String {
     String::from_utf8_lossy(&bytes).trim().to_string()
 }
 fn counts(root: &Path, left: &str, right: &str) -> Option<(usize, usize)> {
-    let out = text(git(root, "Count divergence", &["rev-list", "--left-right", "--count", &format!("{left}...{right}")], false).ok()?);
+    let out =
+        text(git(root, "Count divergence", &["rev-list", "--left-right", "--count", &format!("{left}...{right}")], false).ok()?);
     let mut it = out.split_whitespace().map(|n| n.parse().unwrap_or(0));
     let (behind, ahead) = (it.next()?, it.next()?);
     Some((ahead, behind))
@@ -91,7 +92,12 @@ fn merge_base(root: &Path, a: &str, b: &str) -> Option<String> {
 }
 fn changed(root: &Path, from: &str, to: &str) -> HashSet<PathBuf> {
     git(root, "List changed files", &["diff", "--name-only", "-z", "--no-renames", from, to, "--"], false)
-        .map(|out| out.split(|b| *b == 0).filter(|p| !p.is_empty()).map(|p| PathBuf::from(String::from_utf8_lossy(p).into_owned())).collect())
+        .map(|out| {
+            out.split(|b| *b == 0)
+                .filter(|p| !p.is_empty())
+                .map(|p| PathBuf::from(String::from_utf8_lossy(p).into_owned()))
+                .collect()
+        })
         .unwrap_or_default()
 }
 /// The trunk: what `origin/HEAD` names, else main, master, trunk or develop, else the current branch.
@@ -104,7 +110,11 @@ fn trunk(root: &Path, names: &HashSet<String>, current: Option<&str>) -> Option<
             return Some(name.into());
         }
     }
-    ["main", "master", "trunk", "develop"].iter().find(|n| names.contains(**n)).map(|n| n.to_string()).or(current.map(String::from))
+    ["main", "master", "trunk", "develop"]
+        .iter()
+        .find(|n| names.contains(**n))
+        .map(|n| n.to_string())
+        .or(current.map(String::from))
 }
 /// `f` over `items` on a few threads, results in order: each item costs a Git process or two.
 fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
@@ -172,27 +182,36 @@ pub fn read(root: &Path, open: &Path, sessions: Vec<agents::Session>) -> Result<
     let open_root = open.canonicalize().unwrap_or_else(|_| open.to_path_buf());
     let listed: Vec<worktrees::Worktree> = worktrees::list(root)?.into_iter().take(64).collect();
     let trees: Vec<Worktree> = parallel(&listed, |w| {
-            let w = w.clone();
-            let dirty = (!w.bare && w.path.exists())
-                .then(|| operations::run(&w.path, operations::Operation::Status).ok().and_then(|b| status::parse(&b).ok()).map(|s| s.files.len()))
-                .flatten();
-            let canonical = w.path.canonicalize().unwrap_or_else(|_| w.path.clone());
-            Worktree {
-                open: canonical == open_root,
-                branch: w.branch.as_deref().map(|b| b.trim_start_matches("refs/heads/").to_string()),
-                head: w.head.clone(),
-                dirty,
-                main: w.main,
-                locked: w.locked.is_some(),
-                prunable: w.prunable.is_some(),
-                path: w.path,
-            }
-        });
+        let w = w.clone();
+        let dirty = (!w.bare && w.path.exists())
+            .then(|| {
+                operations::run(&w.path, operations::Operation::Status)
+                    .ok()
+                    .and_then(|b| status::parse(&b).ok())
+                    .map(|s| s.files.len())
+            })
+            .flatten();
+        let canonical = w.path.canonicalize().unwrap_or_else(|_| w.path.clone());
+        Worktree {
+            open: canonical == open_root,
+            branch: w.branch.as_deref().map(|b| b.trim_start_matches("refs/heads/").to_string()),
+            head: w.head.clone(),
+            dirty,
+            main: w.main,
+            locked: w.locked.is_some(),
+            prunable: w.prunable.is_some(),
+            path: w.path,
+        }
+    });
     let paths: Vec<PathBuf> = trees.iter().map(|w| w.path.clone()).collect();
-    let agents: Vec<_> = sessions.into_iter().map(|s| {
-        let w = agents::worktree_of(&s, &paths).cloned();
-        (s, w)
-    }).filter(|(_, w)| w.is_some()).collect();
+    let agents: Vec<_> = sessions
+        .into_iter()
+        .map(|s| {
+            let w = agents::worktree_of(&s, &paths).cloned();
+            (s, w)
+        })
+        .filter(|(_, w)| w.is_some())
+        .collect();
     let names: HashSet<String> = branches.iter().map(|b| b.name.clone()).collect();
     let current = branches.iter().find(|b| b.current).map(|b| b.name.clone());
     let trunk = trunk(root, &names, current.as_deref());
@@ -233,8 +252,12 @@ pub fn read(root: &Path, open: &Path, sessions: Vec<agents::Session>) -> Result<
     // A branch started from another unmerged branch builds on it: the other's tip is among its
     // own commits beyond the trunk. Of several, the nearest (the one with most commits) wins.
     if let Some(t) = &trunk_tip {
-        let open: Vec<(String, String)> =
-            branches.iter().filter(|b| b.active && !b.trunk && !b.merged).take(ACTIVE_LIMIT).map(|b| (b.name.clone(), b.tip.clone())).collect();
+        let open: Vec<(String, String)> = branches
+            .iter()
+            .filter(|b| b.active && !b.trunk && !b.merged)
+            .take(ACTIVE_LIMIT)
+            .map(|b| (b.name.clone(), b.tip.clone()))
+            .collect();
         let own: HashMap<String, HashSet<String>> = open
             .iter()
             .zip(parallel(&open, |(_, tip)| {
@@ -249,7 +272,12 @@ pub fn read(root: &Path, open: &Path, sessions: Vec<agents::Session>) -> Result<
         for (name, commits) in &own {
             let best = own
                 .iter()
-                .filter(|(other, theirs)| *other != name && commits.contains(&tips[*other]) && tips[*other] != tips[name] && theirs.len() < commits.len())
+                .filter(|(other, theirs)| {
+                    *other != name
+                        && commits.contains(&tips[*other])
+                        && tips[*other] != tips[name]
+                        && theirs.len() < commits.len()
+                })
                 .max_by_key(|(other, theirs)| (theirs.len(), std::cmp::Reverse((*other).clone())));
             if let Some((other, _)) = best {
                 parents.insert(name.clone(), other.clone());
@@ -316,15 +344,17 @@ pub fn worktree_id(path: &Path) -> String {
 pub fn nodes(flow: &Flow, inactive: bool) -> Vec<(String, Option<String>)> {
     let shown: Vec<&Branch> = flow.branches.iter().filter(|b| inactive || b.active).collect();
     let names: HashSet<&str> = shown.iter().map(|b| b.name.as_str()).collect();
-    let mut out: Vec<(String, Option<String>)> = shown
-        .iter()
-        .map(|b| {
-            let parent = b.parent.as_deref().filter(|p| names.contains(p) && !b.trunk).map(branch_id).or_else(|| {
-                (!b.trunk).then(|| flow.trunk.as_deref().filter(|t| names.contains(t)).map(branch_id)).flatten()
-            });
-            (branch_id(&b.name), parent)
-        })
-        .collect();
+    let mut out: Vec<(String, Option<String>)> =
+        shown
+            .iter()
+            .map(|b| {
+                let parent =
+                    b.parent.as_deref().filter(|p| names.contains(p) && !b.trunk).map(branch_id).or_else(|| {
+                        (!b.trunk).then(|| flow.trunk.as_deref().filter(|t| names.contains(t)).map(branch_id)).flatten()
+                    });
+                (branch_id(&b.name), parent)
+            })
+            .collect();
     for w in flow.worktrees.iter().filter(|w| w.branch.is_none()) {
         out.push((worktree_id(&w.path), flow.trunk.as_deref().map(branch_id)));
     }
